@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -7,6 +8,17 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { FunctionDeclaration, GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { ControlEvent, TikTokLiveConnection, WebcastEvent } from 'tiktok-live-connector';
+import {
+  applyApprovalTransition,
+  buildIntegrationAuditReport,
+  buildPipelineTrace,
+  DecisionApprovalMode,
+  DecisionApprovalStatus,
+  IntegrationAuditReport,
+  PipelineStageLog,
+  PlannedExecutionPayload,
+  ProviderStageInput,
+} from './src/engine/decisionPipeline';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -308,6 +320,13 @@ interface AiDirectorDecision {
   musicTrackId?: string | null;
   soundCueId?: string | null;
   vfxId?: string | null;
+  approvalStatus?: DecisionApprovalStatus;
+  decidedBy?: 'GEMINI' | 'OPENAI_CLAUDE_GEMINI' | 'DETERMINISTIC' | 'MANUAL';
+  approvedAt?: number | null;
+  approvedBy?: string | null;
+  executedAt?: number | null;
+  plannedPayload?: PlannedExecutionPayload | null;
+  pipelineTrace?: PipelineStageLog[];
 }
 
 interface LearnedCreatorProfile {
@@ -1005,6 +1024,9 @@ interface ServerBattleState {
   aiMoodProfile: AiMoodProfileId;
   aiTensionScore: number;
   aiEnergyScore: number;
+  approvalMode?: DecisionApprovalMode;
+  integrationAudit?: IntegrationAuditReport;
+  geelarkDevices?: Array<{ id: string; serialName: string; status: string; envName?: string }>;
   recentChatMessages: { user: string; text: string; ts: number; source?: string; avatarUrl?: string }[];
   aiDecisions: AiDirectorDecision[];
   tiktokRoom: {
@@ -1825,6 +1847,8 @@ const battleState: ServerBattleState = {
   aiMoodProfile: 'AUTO_SMART',
   aiTensionScore: 32,
   aiEnergyScore: 40,
+  approvalMode: 'AUTO_EXECUTE',
+  geelarkDevices: [],
   recentChatMessages: [
     { user: 'דניאל_לייב', text: 'יאללה פותחים חזק דאבל טאפ על המסך!', ts: Date.now() - 8000 },
     { user: 'נועה_כהן', text: 'שומרים כפפה לדקה האחרונה תזכרו', ts: Date.now() - 3000 },
@@ -2138,15 +2162,398 @@ function pushLog(item: Omit<LiveEventLogItem, 'id' | 'timestamp' | 'battleTimeSe
   }
 }
 
+let geelarkLastErrorHe: string | null = null;
+
+function readEnvClean(name: string): { value: string; hadPrefix: boolean } {
+  let raw = (process.env[name] || '').trim();
+  if (!raw) return { value: '', hadPrefix: false };
+  let hadPrefix = false;
+  const prefix = `${name}=`;
+  if (raw.startsWith(prefix)) {
+    raw = raw.slice(prefix.length).trim();
+    hadPrefix = true;
+  }
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return { value: raw, hadPrefix };
+}
+
+function normalizeGeeLarkOrigin(rawUrl: string): string {
+  const cleaned = (rawUrl || 'https://openapi.geelark.com').trim().replace(/\/+$/, '');
+  return cleaned.replace(/\/open\/v1(?:\/.*)?$/i, '');
+}
+
+function isGeeLarkConfigured(): boolean {
+  return Boolean(readEnvClean('GEELARK_API_KEY').value && readEnvClean('GEELARK_APP_ID').value);
+}
+
+function computeIntegrationAudit(): IntegrationAuditReport {
+  const externalConnected = battleState.wsSniffer.externalBridges.filter((b) => b.connected).length;
+  return buildIntegrationAuditReport({
+    geelarkConfigured: isGeeLarkConfigured(),
+    geelarkDevicesCount: (battleState.geelarkDevices || []).length,
+    geelarkLastErrorHe,
+    tiktokOauthConfigured: battleState.tiktokRoom.oauthConfigured,
+    tiktokOauthUser: battleState.tiktokRoom.oauthConnectedUser?.displayName || null,
+    tiktokWebcastConnected: battleState.tiktokRoom.connected,
+    tiktokWebcastUsername: battleState.tiktokRoom.targetUsername,
+    tiktokWebcastRoomId: battleState.tiktokRoom.roomId,
+    tiktokWebcastViewers: battleState.tiktokRoom.viewerCount,
+    openaiConfigured: Boolean(readEnvClean('OPENAI_API_KEY').value),
+    claudeConfigured: Boolean(readEnvClean('ANTHROPIC_API_KEY').value),
+    geminiConfigured: Boolean(readEnvClean('GEMINI_API_KEY').value),
+    externalWsConnectedCount: externalConnected,
+  });
+}
+
+async function probeGeeLarkDevices(): Promise<{
+  configured: boolean;
+  connected: boolean;
+  devices: Array<{ id: string; serialName: string; status: string; envName?: string }>;
+  errorHe: string | null;
+  endpointUsed?: string;
+}> {
+  const appIdClean = readEnvClean('GEELARK_APP_ID');
+  const apiKeyClean = readEnvClean('GEELARK_API_KEY');
+  const urlClean = readEnvClean('GEELARK_API_URL');
+
+  if (!appIdClean.value || !apiKeyClean.value) {
+    geelarkLastErrorHe = null;
+    battleState.geelarkDevices = [];
+    battleState.integrationAudit = computeIntegrationAudit();
+    return {
+      configured: false,
+      connected: false,
+      devices: [],
+      errorHe: 'לא מוגדרים GEELARK_APP_ID ו-GEELARK_API_KEY בסביבת השרת.',
+    };
+  }
+
+  const baseOrigin = normalizeGeeLarkOrigin(urlClean.value);
+  const endpointUrl = `${baseOrigin}/open/v1/phone/list`;
+  const appId = appIdClean.value;
+  const apiKey = apiKeyClean.value;
+  const traceId = crypto.randomUUID().replace(/-/g, '').toUpperCase();
+  const ts = String(Date.now());
+  const nonce = traceId.slice(0, 6);
+  const sign = crypto
+    .createHash('sha256')
+    .update(`${appId}${traceId}${ts}${nonce}${apiKey}`)
+    .digest('hex')
+    .toUpperCase();
+
+  try {
+    const resp = await fetch(endpointUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        appId,
+        traceId,
+        ts,
+        nonce,
+        sign,
+      },
+      body: JSON.stringify({ page: 1, pageSize: 20 }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const rawText = await resp.text();
+    let json: {
+      code?: number;
+      msg?: string;
+      data?: { items?: Array<{ id?: string; serialName?: string; status?: number | string; envName?: string }> };
+    } | null = null;
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      geelarkLastErrorHe = `תשובה לא תקינה מ-GeeLark (HTTP ${resp.status} מ-${endpointUrl}): ${rawText.slice(0, 120)}`;
+      battleState.geelarkDevices = [];
+      battleState.integrationAudit = computeIntegrationAudit();
+      return {
+        configured: true,
+        connected: false,
+        devices: [],
+        errorHe: geelarkLastErrorHe,
+        endpointUsed: endpointUrl,
+      };
+    }
+
+    if (!resp.ok || !json || (typeof json.code === 'number' && json.code !== 0)) {
+      geelarkLastErrorHe = json?.msg ? `${json.msg} (code=${json.code ?? resp.status})` : `HTTP ${resp.status}`;
+      battleState.geelarkDevices = [];
+      battleState.integrationAudit = computeIntegrationAudit();
+      return {
+        configured: true,
+        connected: false,
+        devices: [],
+        errorHe: geelarkLastErrorHe,
+        endpointUsed: endpointUrl,
+      };
+    }
+    const devices = (json.data?.items || []).map((d) => ({
+      id: String(d.id || ''),
+      serialName: String(d.serialName || d.id || 'cloud-phone'),
+      status: String(d.status ?? 'unknown'),
+      envName: d.envName,
+    }));
+    geelarkLastErrorHe = null;
+    battleState.geelarkDevices = devices;
+    battleState.integrationAudit = computeIntegrationAudit();
+    return {
+      configured: true,
+      connected: devices.length > 0,
+      devices,
+      errorHe: null,
+      endpointUsed: endpointUrl,
+    };
+  } catch (err: unknown) {
+    geelarkLastErrorHe = err instanceof Error ? err.message : 'שגיאת תקשורת מול GeeLark OpenAPI';
+    battleState.geelarkDevices = [];
+    battleState.integrationAudit = computeIntegrationAudit();
+    return {
+      configured: true,
+      connected: false,
+      devices: [],
+      errorHe: geelarkLastErrorHe,
+      endpointUsed: endpointUrl,
+    };
+  }
+}
+
+async function callOpenAiAdvisor(snapshotJson: string): Promise<ProviderStageInput> {
+  const apiKey = readEnvClean('OPENAI_API_KEY').value;
+  const configuredModel = readEnvClean('OPENAI_MODEL').value || 'gpt-4o-mini';
+  if (!apiKey) {
+    return { configured: false, called: false, ok: false, model: configuredModel, summaryHe: '' };
+  }
+
+  const attemptModel = async (modelToTry: string) => {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: modelToTry,
+        temperature: 0.3,
+        max_tokens: 180,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a TikTok LIVE battle telemetry analyst. Respond in 1-2 concise Hebrew sentences summarizing crowd momentum, score risk, and recommended action.',
+          },
+          { role: 'user', content: snapshotJson },
+        ],
+      }),
+      signal: AbortSignal.timeout(9000),
+    });
+    const json = (await resp.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string; code?: string };
+    };
+    return { resp, json };
+  };
+
+  try {
+    let modelUsed = configuredModel;
+    let { resp, json } = await attemptModel(configuredModel);
+    if (
+      !resp.ok &&
+      configuredModel !== 'gpt-4o-mini' &&
+      /model/i.test(json.error?.message || '')
+    ) {
+      const fallbackAttempt = await attemptModel('gpt-4o-mini');
+      if (fallbackAttempt.resp.ok) {
+        resp = fallbackAttempt.resp;
+        json = fallbackAttempt.json;
+        modelUsed = `gpt-4o-mini (גיבוי מ-${configuredModel})`;
+      }
+    }
+    if (!resp.ok) {
+      return {
+        configured: true,
+        called: true,
+        ok: false,
+        model: modelUsed,
+        summaryHe: '',
+        errorHe: json.error?.message || `OpenAI HTTP ${resp.status}`,
+        timestamp: Date.now(),
+      };
+    }
+    const text = (json.choices?.[0]?.message?.content || '').trim();
+    return {
+      configured: true,
+      called: true,
+      ok: Boolean(text),
+      model: modelUsed,
+      summaryHe: text || 'התקבלה תשובה ריקה מ-OpenAI',
+      timestamp: Date.now(),
+    };
+  } catch (err: unknown) {
+    return {
+      configured: true,
+      called: true,
+      ok: false,
+      model: configuredModel,
+      summaryHe: '',
+      errorHe: err instanceof Error ? err.message : 'שגיאה בקריאה ל-OpenAI',
+      timestamp: Date.now(),
+    };
+  }
+}
+
+async function callClaudeAdvisor(snapshotJson: string, openAiSummaryHe: string): Promise<ProviderStageInput> {
+  const apiKey = readEnvClean('ANTHROPIC_API_KEY').value;
+  const configuredModel = readEnvClean('ANTHROPIC_MODEL').value || 'claude-3-5-sonnet-latest';
+  if (!apiKey) {
+    return { configured: false, called: false, ok: false, model: configuredModel, summaryHe: '' };
+  }
+
+  const attemptModel = async (modelToTry: string) => {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: modelToTry,
+        max_tokens: 200,
+        system:
+          'You are the safety & tactical verifier for a TikTok LIVE studio director. Reply in 1-2 concise Hebrew sentences confirming or refining the tactical move.',
+        messages: [
+          {
+            role: 'user',
+            content: `Live Snapshot:\n${snapshotJson}\n\nOpenAI Note: ${openAiSummaryHe || 'N/A'}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(9000),
+    });
+    const json = (await resp.json()) as {
+      content?: Array<{ text?: string }>;
+      error?: { message?: string; type?: string };
+    };
+    return { resp, json };
+  };
+
+  try {
+    let modelUsed = configuredModel;
+    let { resp, json } = await attemptModel(configuredModel);
+    if (
+      !resp.ok &&
+      configuredModel !== 'claude-3-5-sonnet-latest' &&
+      /model/i.test(json.error?.message || '')
+    ) {
+      const fallbackAttempt = await attemptModel('claude-3-5-sonnet-latest');
+      if (fallbackAttempt.resp.ok) {
+        resp = fallbackAttempt.resp;
+        json = fallbackAttempt.json;
+        modelUsed = `claude-3-5-sonnet-latest (גיבוי מ-${configuredModel})`;
+      }
+    }
+    if (!resp.ok) {
+      return {
+        configured: true,
+        called: true,
+        ok: false,
+        model: modelUsed,
+        summaryHe: '',
+        errorHe: json.error?.message || `Claude HTTP ${resp.status}`,
+        timestamp: Date.now(),
+      };
+    }
+    const text = (json.content?.[0]?.text || '').trim();
+    return {
+      configured: true,
+      called: true,
+      ok: Boolean(text),
+      model: modelUsed,
+      summaryHe: text || 'התקבלה תשובה ריקה מ-Claude',
+      timestamp: Date.now(),
+    };
+  } catch (err: unknown) {
+    return {
+      configured: true,
+      called: true,
+      ok: false,
+      model: configuredModel,
+      summaryHe: '',
+      errorHe: err instanceof Error ? err.message : 'שגיאה בקריאה ל-Claude',
+      timestamp: Date.now(),
+    };
+  }
+}
+
 function recordAiDecision(decision: Omit<AiDirectorDecision, 'id' | 'timestamp'>): AiDirectorDecision {
+  const now = Date.now();
+  const approvalStatus: DecisionApprovalStatus = decision.approvalStatus || 'AUTO_EXECUTED';
+  const trace =
+    decision.pipelineTrace ||
+    buildPipelineTrace({
+      nowTs: now,
+      liveConnected: battleState.tiktokRoom.connected,
+      liveTargetUsername: battleState.tiktokRoom.targetUsername,
+      liveRoomId: battleState.tiktokRoom.roomId,
+      liveViewerCount: battleState.tiktokRoom.viewerCount,
+      packetsCaptured: battleState.wsSniffer.totalPacketsCaptured,
+      dataSummaryHe: `מצב ${battleState.streamMode} · שלב ${battleState.phase} · ניקוד ${battleState.myScore}:${battleState.opponentScore} · קצב ${battleState.likesPerSecond}/שנ׳`,
+      openai: {
+        configured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+        called: false,
+        ok: false,
+        summaryHe: '',
+      },
+      claude: {
+        configured: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+        called: false,
+        ok: false,
+        summaryHe: '',
+      },
+      gemini: {
+        configured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+        called: decision.decidedBy === 'GEMINI' || decision.decidedBy === 'OPENAI_CLAUDE_GEMINI',
+        ok: decision.decidedBy === 'GEMINI' || decision.decidedBy === 'OPENAI_CLAUDE_GEMINI',
+        model: 'gemini-4-hydrogen',
+        summaryHe: decision.detectedSituationHe,
+      },
+      decisionSummaryHe: decision.actionsTakenHe.join(' · ') || decision.detectedSituationHe,
+      approvalMode: battleState.approvalMode || 'AUTO_EXECUTE',
+      approvalStatus,
+      executionDetailHe:
+        approvalStatus === 'PENDING_APPROVAL'
+          ? 'ממתין לאישור מפעיל'
+          : `בוצע על מנוע הבמה המקומי (${decision.actionsTakenHe.join(' · ')})`,
+      executionEvidence: [
+        decision.vfxId ? `vfx=${decision.vfxId}` : '',
+        decision.soundCueId ? `sound=${decision.soundCueId}` : '',
+        decision.musicTrackId ? `music=${decision.musicTrackId}` : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      resultDetailHe: 'סטייט עודכן ושודר ל-OBS/Browser Source וללקוחות WebSocket',
+    });
+
   const entry: AiDirectorDecision = {
     id: nextId('ai'),
-    timestamp: Date.now(),
+    timestamp: now,
+    approvalStatus,
+    decidedBy: decision.decidedBy || 'DETERMINISTIC',
+    executedAt: approvalStatus === 'AUTO_EXECUTED' ? now : null,
     ...decision,
+    pipelineTrace: trace,
   };
   battleState.aiDecisions.unshift(entry);
   if (battleState.aiDecisions.length > 20) {
-    battleState.aiDecisions.length = 20;
+    const pending = battleState.aiDecisions.filter((d) => d.approvalStatus === 'PENDING_APPROVAL');
+    const others = battleState.aiDecisions.filter((d) => d.approvalStatus !== 'PENDING_APPROVAL');
+    const keepOthers = Math.max(0, 20 - pending.length);
+    battleState.aiDecisions = [...pending, ...others.slice(0, keepOthers)].sort(
+      (a, b) => b.timestamp - a.timestamp
+    );
   }
   return entry;
 }
@@ -2234,7 +2641,7 @@ function tryTriggerOneShot(
 
 function getGeminiClient(): GoogleGenAI {
   return new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: readEnvClean('GEMINI_API_KEY').value || process.env.GEMINI_API_KEY,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -3795,7 +4202,165 @@ async function startServer() {
   });
 
   app.get('/api/state', (_req, res) => {
+    battleState.integrationAudit = computeIntegrationAudit();
     res.json(battleState);
+  });
+
+  app.get('/api/integrations/audit', (_req, res) => {
+    const audit = computeIntegrationAudit();
+    battleState.integrationAudit = audit;
+    res.json({ ok: true, audit, geelarkDevices: battleState.geelarkDevices || [], state: battleState });
+  });
+
+  app.post('/api/geelark/probe', async (_req, res) => {
+    const probe = await probeGeeLarkDevices();
+    broadcast({ type: 'state:update', state: battleState });
+    res.json({ ok: probe.connected, ...probe, audit: battleState.integrationAudit, state: battleState });
+  });
+
+  app.post('/api/geelark/execute-chat', async (req, res) => {
+    const messageText = String(req.body?.messageText || '').trim();
+    const deviceId = String(req.body?.deviceId || process.env.GEELARK_ENV_ID || '').trim();
+    if (!messageText) {
+      res.status(400).json({ ok: false, errorHe: 'נדרש טקסט הודעה לביצוע' });
+      return;
+    }
+    if (!isGeeLarkConfigured()) {
+      res.status(412).json({
+        ok: false,
+        status: 'NOT_CONFIGURED',
+        errorHe: 'לא ניתן לבצע פעולת צ׳אט במכשיר GeeLark — חסרים GEELARK_APP_ID ו-GEELARK_API_KEY בסביבה.',
+      });
+      return;
+    }
+    const probe = await probeGeeLarkDevices();
+    if (!probe.connected || probe.devices.length === 0) {
+      res.status(412).json({
+        ok: false,
+        status: 'NO_ACTIVE_DEVICE',
+        errorHe: probe.errorHe || 'אין מכשיר GeeLark פעיל מחובר כרגע.',
+      });
+      return;
+    }
+    const targetDevice = probe.devices.find((d) => d.id === deviceId) || probe.devices[0];
+    res.status(501).json({
+      ok: false,
+      status: 'DEVICE_FOUND_NO_ADB_AUTOMATION',
+      device: targetDevice,
+      errorHe: `נמצא מכשיר GeeLark (${targetDevice.serialName}), אך משימת הקלדת הצ׳אט האוטומטית בטיקטוק טרם הוגדרה לפרופיל זה.`,
+    });
+  });
+
+  app.post('/api/ai-director/approval-mode', (req, res) => {
+    const mode = req.body?.approvalMode === 'REQUIRE_APPROVAL' ? 'REQUIRE_APPROVAL' : 'AUTO_EXECUTE';
+    battleState.approvalMode = mode;
+    battleState.integrationAudit = computeIntegrationAudit();
+    broadcast({ type: 'state:update', state: battleState });
+    res.json({ ok: true, approvalMode: mode, state: battleState });
+  });
+
+  app.post('/api/ai-director/approval-action', async (req, res) => {
+    const decisionId = String(req.body?.decisionId || '').trim();
+    const action = req.body?.action === 'REJECT' ? 'REJECT' : 'APPROVE';
+    const actor = String(req.body?.actor || 'מפעיל אולפן').trim();
+    const executeToGeeLark = Boolean(req.body?.executeToGeeLark);
+
+    const idx = battleState.aiDecisions.findIndex((d) => d.id === decisionId);
+    if (idx < 0) {
+      res.status(404).json({ ok: false, errorHe: 'החלטה לא נמצאה בתור ההחלטות' });
+      return;
+    }
+
+    const decision = battleState.aiDecisions[idx];
+    if (action === 'REJECT') {
+      const tr = applyApprovalTransition(decision, 'REJECT', actor, Date.now());
+      if (!tr.ok) {
+        res.status(409).json({ ok: false, errorHe: tr.errorHe });
+        return;
+      }
+      battleState.aiDecisions[idx] = tr.updated;
+      broadcast({ type: 'ai:decision', decision: tr.updated, state: battleState });
+      res.json({ ok: true, decision: tr.updated, state: battleState });
+      return;
+    }
+
+    if ((decision.approvalStatus || 'AUTO_EXECUTED') !== 'PENDING_APPROVAL') {
+      res.status(409).json({
+        ok: false,
+        errorHe: `לא ניתן לאשר החלטה בסטטוס ${decision.approvalStatus}`,
+      });
+      return;
+    }
+
+    const payload = decision.plannedPayload || {};
+    const executedParts: string[] = [];
+    const evidenceParts: string[] = [];
+
+    if (payload.musicTrackId && VALID_MUSIC_IDS.has(payload.musicTrackId)) {
+      emitMusicChange(payload.musicTrackId, undefined, 'בוצע לאחר אישור מפעיל');
+      executedParts.push(`מוזיקה: ${payload.musicTrackId}`);
+      evidenceParts.push(`music=${payload.musicTrackId}`);
+    }
+    if (payload.soundCueId && VALID_SOUND_IDS.has(payload.soundCueId)) {
+      emitSoundCue(payload.soundCueId, 'סאונד אושר ובוצע');
+      executedParts.push(`סאונד: ${payload.soundCueId}`);
+      evidenceParts.push(`sound=${payload.soundCueId}`);
+    }
+    if (payload.vfxId && EFFECT_RULES[payload.vfxId]) {
+      const vfx = tryTriggerOneShot(payload.vfxId, 'החלטה מאושרת', 1.0, true);
+      if (vfx.triggered && vfx.instance) {
+        broadcast({ type: 'effect:triggered', effect: vfx.instance, state: battleState });
+        executedParts.push(`VFX: ${payload.vfxId}`);
+        evidenceParts.push(`vfx=${payload.vfxId}`);
+      }
+    }
+    if (payload.cameraPreset && VALID_CAMERA_PRESETS.has(payload.cameraPreset as CameraPresetId)) {
+      triggerCameraKinetic(
+        payload.cameraPreset as CameraPresetId,
+        1.0,
+        1500,
+        payload.cameraReasonHe || 'תנועת מצלמה מאושרת'
+      );
+      executedParts.push(`מצלמה: ${payload.cameraPreset}`);
+      evidenceParts.push(`camera=${payload.cameraPreset}`);
+    }
+    if (payload.tapCalloutTextHe) {
+      activateTapStimulus(payload.tapDurationSec || 8, payload.tapCalloutTextHe);
+      emitSoundCue('SND_TAP_DOPAMINE_PULSE');
+      executedParts.push(`גירוי טאפ: ${payload.tapCalloutTextHe}`);
+      evidenceParts.push('tap=active');
+    }
+
+    if (executedParts.length === 0) {
+      activateTapStimulus(7, 'APPROVED BOOST!');
+      executedParts.push('גירוי טאפ מאושר על הבמה');
+      evidenceParts.push('tap=APPROVED_BOOST');
+    }
+
+    let geelarkNote = '';
+    if (executeToGeeLark) {
+      geelarkNote = isGeeLarkConfigured()
+        ? ' · גשר GeeLark זמין'
+        : ' · GeeLark לא מוגדר (בוצע בבמת BOOSTERA בלבד)';
+    }
+
+    const tr = applyApprovalTransition(decision, 'APPROVE', actor, Date.now(), {
+      ok: true,
+      detailHe: `בוצע על מנוע הבמה של BOOSTERA: ${executedParts.join(' · ')}${geelarkNote}`,
+      evidence: evidenceParts.join(' '),
+      resultDetailHe: `הפעולה הופעלה ונקלטה ב-battleState ושודרה ל-${wss.clients.size} לקוחות מחוברים`,
+    });
+
+    battleState.aiDecisions[idx] = tr.updated;
+    pushLog({
+      eventType: 'AI_DECISION_APPROVED',
+      userLabel: actor,
+      triggeredEffectId: payload.vfxId || null,
+      status: 'TRIGGERED',
+      detailHe: `אושר ובוצע: ${executedParts.join(' · ')}`,
+    });
+    broadcast({ type: 'ai:decision', decision: tr.updated, state: battleState });
+    res.json({ ok: true, decision: tr.updated, state: battleState });
   });
 
   app.post('/api/events', (req, res) => {
@@ -4325,6 +4890,7 @@ async function startServer() {
       }
     }
     battleState.memorySummary = buildMemorySummary();
+    battleState.integrationAudit = computeIntegrationAudit();
   }
 
   function upsertWatchlistCreator(
@@ -6740,7 +7306,12 @@ Return JSON matching the schema, with all Hebrew fields in sharp, practical stud
   // 6. MULTIMODAL AUTONOMOUS AI SHOWRUNNER (Audio + Chat + Camera + Tap + Memory)
   // ============================================================================
   app.post('/api/ai-director/decide', async (req, res) => {
-    const { audioBase64, audioMimeType, micMetrics, availableCustomTracks, directorPromptHe } = req.body || {};
+    const { audioBase64, audioMimeType, micMetrics, availableCustomTracks, directorPromptHe, requireApproval } =
+      req.body || {};
+    const needsApproval =
+      typeof requireApproval === 'boolean'
+        ? requireApproval
+        : battleState.approvalMode === 'REQUIRE_APPROVAL';
 
     const activeMemoryDirectives = aiMemory.energyRules
       .filter((r) => r.active)
@@ -6779,8 +7350,20 @@ Return JSON matching the schema, with all Hebrew fields in sharp, practical stud
       explicitHostNoteHe: directorPromptHe || null,
     };
 
+    const telemetryJson = JSON.stringify(liveTelemetry, null, 2);
+    const openAiStage = await callOpenAiAdvisor(telemetryJson);
+    const claudeStage = await callClaudeAdvisor(telemetryJson, openAiStage.summaryHe);
+    const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
+
     try {
       const ai = getGeminiClient();
+      const advisorContext = [
+        openAiStage.ok ? `OpenAI Telemetry Advisor: ${openAiStage.summaryHe}` : null,
+        claudeStage.ok ? `Claude Safety/Tactical Verifier: ${claudeStage.summaryHe}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
       const systemPrompt = `You are BOOSTERA's Apex-Capability Live Showrunner, Kinetic Camera Director & Audience Hypnosis AI for TikTok LIVE.
 You control EVERYTHING in real time:
 1. Music Deck (8 studio tracks + custom tracks) & Voice Balance
@@ -6792,11 +7375,12 @@ You control EVERYTHING in real time:
 
 LEARNED MEMORY DIRECTIVES CURRENTLY ACTIVE:
 ${activeMemoryDirectives}
+${advisorContext ? `\nMULTI-MODEL ADVISOR NOTES:\n${advisorContext}` : ''}
 
 Always call 'assessLiveMood' first with a sharp Hebrew insight, and coordinate Camera + Sound + Tap-Stimulus + Music/VFX intelligently without overloading!
 
 Live Broadcast Snapshot JSON:
-${JSON.stringify(liveTelemetry, null, 2)}`;
+${telemetryJson}`;
 
       const parts: Array<{ inlineData: { mimeType: string; data: string } } | { text: string }> = [];
       if (audioBase64 && typeof audioBase64 === 'string' && audioBase64.length > 64) {
@@ -6829,6 +7413,7 @@ ${JSON.stringify(liveTelemetry, null, 2)}`;
       let chosenMusic: string | null = null;
       let chosenSound: string | null = null;
       let chosenVfx: string | null = null;
+      const plannedPayload: PlannedExecutionPayload = {};
 
       const customIds = new Set(
         Array.isArray(availableCustomTracks)
@@ -6848,34 +7433,44 @@ ${JSON.stringify(liveTelemetry, null, 2)}`;
           if (typeof args.energyScore === 'number') {
             energyScore = Math.max(0, Math.min(100, Math.round(args.energyScore)));
           }
-          aiMoodBias = { tension: tensionScore, energy: energyScore, updatedAt: Date.now() };
-          battleState.aiTensionScore = tensionScore;
-          battleState.aiEnergyScore = energyScore;
+          if (!needsApproval) {
+            aiMoodBias = { tension: tensionScore, energy: energyScore, updatedAt: Date.now() };
+            battleState.aiTensionScore = tensionScore;
+            battleState.aiEnergyScore = energyScore;
+          }
         } else if (call.name === 'selectMusicTrack') {
           const trackId = String(args.trackId || '');
           const reasonHe = String(args.reasonHe || 'התאמת מוזיקה');
           if ((VALID_MUSIC_IDS.has(trackId) || customIds.has(trackId)) && trackId !== battleState.activeMusicTrackId) {
-            emitMusicChange(trackId, undefined, `במאי AI החליף מוזיקה: ${reasonHe}`);
             chosenMusic = trackId;
+            plannedPayload.musicTrackId = trackId;
             actionsTakenHe.push(`מוזיקה: ${trackId}`);
+            if (!needsApproval) {
+              emitMusicChange(trackId, undefined, `במאי AI החליף מוזיקה: ${reasonHe}`);
+            }
           }
         } else if (call.name === 'triggerSoundCue') {
           const soundId = String(args.soundId || '');
           const reasonHe = String(args.reasonHe || 'חיזוק סאונד');
           if (VALID_SOUND_IDS.has(soundId)) {
-            emitSoundCue(soundId, `במאי AI הפעיל סאונד ${soundId}: ${reasonHe}`);
             chosenSound = soundId;
+            plannedPayload.soundCueId = soundId;
             actionsTakenHe.push(`סאונד: ${soundId} (${reasonHe})`);
+            if (!needsApproval) {
+              emitSoundCue(soundId, `במאי AI הפעיל סאונד ${soundId}: ${reasonHe}`);
+            }
           }
         } else if (call.name === 'triggerVisualEffect') {
           const effectId = String(args.effectId || '');
-          const reasonHe = String(args.reasonHe || 'אפקט VFX');
           if (EFFECT_RULES[effectId]) {
-            const vfx = tryTriggerOneShot(effectId, 'במאי AI חכם', 1.0, true);
-            if (vfx.triggered && vfx.instance) {
-              broadcast({ type: 'effect:triggered', effect: vfx.instance, state: battleState });
-              chosenVfx = effectId;
-              actionsTakenHe.push(`VFX: ${effectId}`);
+            chosenVfx = effectId;
+            plannedPayload.vfxId = effectId;
+            actionsTakenHe.push(`VFX: ${effectId}`);
+            if (!needsApproval) {
+              const vfx = tryTriggerOneShot(effectId, 'במאי AI חכם', 1.0, true);
+              if (vfx.triggered && vfx.instance) {
+                broadcast({ type: 'effect:triggered', effect: vfx.instance, state: battleState });
+              }
             }
           }
         } else if (call.name === 'triggerCameraMove') {
@@ -6884,20 +7479,30 @@ ${JSON.stringify(liveTelemetry, null, 2)}`;
           const intensity = Number(args.intensity) || 1.0;
           const durationMs = Number(args.durationMs) || 1500;
           const reasonHe = String(args.reasonHe || 'תנועת מצלמה');
-          triggerCameraKinetic(preset, intensity, durationMs, reasonHe);
+          plannedPayload.cameraPreset = preset;
+          plannedPayload.cameraReasonHe = reasonHe;
           actionsTakenHe.push(`מצלמה: ${preset} (${reasonHe})`);
+          if (!needsApproval) {
+            triggerCameraKinetic(preset, intensity, durationMs, reasonHe);
+          }
         } else if (call.name === 'triggerTapStimulus') {
           const callout = String(args.calloutTextHe || 'DOUBLE TAP NOW!');
           const dur = Number(args.durationSec) || 8;
           const reasonHe = String(args.reasonHe || 'גירוי לחיצות אצבע');
-          activateTapStimulus(dur, callout);
-          emitSoundCue('SND_TAP_DOPAMINE_PULSE');
+          plannedPayload.tapCalloutTextHe = callout;
+          plannedPayload.tapDurationSec = dur;
           actionsTakenHe.push(`גירוי אצבע: "${callout}" (${reasonHe})`);
+          if (!needsApproval) {
+            activateTapStimulus(dur, callout);
+            emitSoundCue('SND_TAP_DOPAMINE_PULSE');
+          }
         } else if (call.name === 'setMixBalance') {
           const vol = Number(args.musicVolumePct);
           if (!Number.isNaN(vol)) {
-            emitMusicChange(battleState.activeMusicTrackId, vol);
-            actionsTakenHe.push(`עוצמת מוזיקה: ${battleState.musicVolumePct}%`);
+            if (!needsApproval) {
+              emitMusicChange(battleState.activeMusicTrackId, vol);
+            }
+            actionsTakenHe.push(`עוצמת מוזיקה: ${Math.round(vol)}%`);
           }
         } else if (call.name === 'saveLearnedRule') {
           const titleHe = String(args.titleHe || '').trim();
@@ -6951,8 +7556,48 @@ ${JSON.stringify(liveTelemetry, null, 2)}`;
       }
 
       if (actionsTakenHe.length === 0) {
-        actionsTakenHe.push('המיקס, המצלמה והקצב מדויקים לרגע זה — ממשיך להאזין');
+        plannedPayload.tapCalloutTextHe = 'DOUBLE TAP BOOST!';
+        plannedPayload.tapDurationSec = 7;
+        actionsTakenHe.push('שמירת קצב וגירוי דאבל-טאפ ממוקד');
       }
+
+      const nowTs = Date.now();
+      const approvalStatus: DecisionApprovalStatus = needsApproval ? 'PENDING_APPROVAL' : 'AUTO_EXECUTED';
+      const decidedBy = openAiStage.ok || claudeStage.ok ? 'OPENAI_CLAUDE_GEMINI' : 'GEMINI';
+      const pipelineTrace = buildPipelineTrace({
+        nowTs,
+        liveConnected: battleState.tiktokRoom.connected,
+        liveTargetUsername: battleState.tiktokRoom.targetUsername,
+        liveRoomId: battleState.tiktokRoom.roomId,
+        liveViewerCount: battleState.tiktokRoom.viewerCount,
+        packetsCaptured: battleState.wsSniffer.totalPacketsCaptured,
+        dataSummaryHe: `מצב ${battleState.streamMode} · שלב ${battleState.phase} · ניקוד ${battleState.myScore}:${battleState.opponentScore} · קצב ${battleState.likesPerSecond}/שנ׳`,
+        openai: openAiStage,
+        claude: claudeStage,
+        gemini: {
+          configured: geminiConfigured,
+          called: true,
+          ok: true,
+          model: 'gemini-4-hydrogen',
+          summaryHe: detectedSituationHe,
+          timestamp: nowTs,
+        },
+        decisionSummaryHe: actionsTakenHe.join(' · '),
+        approvalMode: needsApproval ? 'REQUIRE_APPROVAL' : 'AUTO_EXECUTE',
+        approvalStatus,
+        executionDetailHe: needsApproval
+          ? 'ממתין לאישור מפעיל'
+          : `בוצע ישירות על מנוע הבמה (${actionsTakenHe.join(' · ')})`,
+        executionEvidence: [
+          chosenVfx ? `vfx=${chosenVfx}` : '',
+          chosenSound ? `sound=${chosenSound}` : '',
+          chosenMusic ? `music=${chosenMusic}` : '',
+          plannedPayload.cameraPreset ? `camera=${plannedPayload.cameraPreset}` : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+        resultDetailHe: `התוצאה עודכנה ב-battleState ושודרה ל-${wss.clients.size} לקוחות מחוברים`,
+      });
 
       const decision = recordAiDecision({
         streamMode: battleState.streamMode,
@@ -6963,22 +7608,68 @@ ${JSON.stringify(liveTelemetry, null, 2)}`;
         musicTrackId: chosenMusic,
         soundCueId: chosenSound,
         vfxId: chosenVfx,
+        approvalStatus,
+        decidedBy,
+        plannedPayload,
+        pipelineTrace,
       });
 
       broadcast({ type: 'ai:decision', decision, state: battleState });
       res.json({ ok: true, decision, state: battleState });
     } catch (err: unknown) {
-      activateTapStimulus(8, 'TAP-TAP BOOST!');
-      triggerCameraKinetic('BASS_PUMP', 0.95, 2000, 'שמירת קצב אוטומטית');
+      const errMsg = err instanceof Error ? err.message : 'שגיאת מנוע AI';
+      const nowTs = Date.now();
+      const approvalStatus: DecisionApprovalStatus = needsApproval ? 'PENDING_APPROVAL' : 'AUTO_EXECUTED';
+      const plannedPayload: PlannedExecutionPayload = {
+        cameraPreset: 'BASS_PUMP',
+        cameraReasonHe: 'שמירת קצב אוטומטית',
+        tapCalloutTextHe: 'TAP-TAP BOOST!',
+        tapDurationSec: 8,
+      };
+      if (!needsApproval) {
+        activateTapStimulus(8, 'TAP-TAP BOOST!');
+        triggerCameraKinetic('BASS_PUMP', 0.95, 2000, 'שמירת קצב אוטומטית');
+      }
+
+      const pipelineTrace = buildPipelineTrace({
+        nowTs,
+        liveConnected: battleState.tiktokRoom.connected,
+        liveTargetUsername: battleState.tiktokRoom.targetUsername,
+        liveRoomId: battleState.tiktokRoom.roomId,
+        liveViewerCount: battleState.tiktokRoom.viewerCount,
+        packetsCaptured: battleState.wsSniffer.totalPacketsCaptured,
+        dataSummaryHe: `מצב ${battleState.streamMode} · ניקוד ${battleState.myScore}:${battleState.opponentScore}`,
+        openai: openAiStage,
+        claude: claudeStage,
+        gemini: {
+          configured: geminiConfigured,
+          called: true,
+          ok: false,
+          model: 'gemini-4-hydrogen',
+          summaryHe: '',
+          errorHe: errMsg,
+          timestamp: nowTs,
+        },
+        decisionSummaryHe: 'מסלול גיבוי דטרמיניסטי: גירוי אצבע (TAP-TAP BOOST!) + פעימת מצלמה BASS_PUMP',
+        approvalMode: needsApproval ? 'REQUIRE_APPROVAL' : 'AUTO_EXECUTE',
+        approvalStatus,
+        executionDetailHe: needsApproval ? 'ממתין לאישור מפעיל' : 'בוצע במסלול גיבוי על הבמה המקומית',
+        executionEvidence: 'camera=BASS_PUMP tap=TAP-TAP_BOOST',
+        resultDetailHe: 'סטייט עודכן במנוע הבמה',
+      });
+
       const decision = recordAiDecision({
         streamMode: battleState.streamMode,
-        detectedSituationHe: 'הופעל גירוי טאפ ופעימת מצלמה לשמירת אנרגיית הצופים.',
+        detectedSituationHe: 'הופעל גירוי טאפ ופעימת מצלמה לשמירת אנרגיית הצופים (מסלול גיבוי).',
         tensionScore: battleState.aiTensionScore,
         energyScore: battleState.aiEnergyScore,
         actionsTakenHe: ['גירוי אצבע (TAP-TAP BOOST!) + פעימת מצלמה BASS_PUMP'],
+        approvalStatus,
+        decidedBy: 'DETERMINISTIC',
+        plannedPayload,
+        pipelineTrace,
       });
       broadcast({ type: 'ai:decision', decision, state: battleState });
-      const errMsg = err instanceof Error ? err.message : undefined;
       res.json({ ok: true, decision, fallbackUsed: true, note: errMsg, state: battleState });
     }
   });
@@ -6992,7 +7683,7 @@ ${JSON.stringify(liveTelemetry, null, 2)}`;
   let autonomousGeminiBusy = false;
 
   setInterval(() => {
-    if (!battleState.aiAutopilot) return;
+    if (!battleState.aiAutopilot || battleState.approvalMode === 'REQUIRE_APPROVAL') return;
     // Do not interrupt Intentional Quiet Valleys except in Snipe Window or Glove x5
     const sec = battleState.elapsedSec;
     const inQuietValley =
@@ -7109,6 +7800,7 @@ Call 'assessLiveMood' and pick 1-2 fitting actions (preferring our 7 real studio
               musicTrackId: musChosen,
               soundCueId: sndChosen,
               vfxId: vfxChosen,
+              decidedBy: 'GEMINI',
             });
             broadcast({ type: 'ai:decision', decision: dec, state: battleState });
           }
@@ -7853,6 +8545,15 @@ ${collectedLiveChat.slice(0, 35).join('\n') || 'אין עדיין דגימות �
   const PORT = Number(process.env.PORT || 3000);
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`BOOSTERA Apex Broadcast Engine running on http://0.0.0.0:${PORT}`);
+    if (isGeeLarkConfigured()) {
+      setTimeout(() => {
+        void probeGeeLarkDevices()
+          .then(() => {
+            broadcast({ type: 'state:update', state: battleState });
+          })
+          .catch(() => {});
+      }, 1500);
+    }
   });
 }
 

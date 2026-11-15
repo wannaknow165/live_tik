@@ -44,6 +44,8 @@ const INITIAL_FALLBACK_STATE: BattleState = {
   aiMoodProfile: 'AUTO_SMART',
   aiTensionScore: 32,
   aiEnergyScore: 40,
+  approvalMode: 'AUTO_EXECUTE',
+  geelarkDevices: [],
   recentChatMessages: [],
   aiDecisions: [],
   tiktokRoom: {
@@ -464,6 +466,7 @@ export function useBattleLiveEngine(enableAudio = true) {
       };
       availableCustomTracks?: { id: string; titleHe: string }[];
       directorPromptHe?: string;
+      requireApproval?: boolean;
     }): Promise<AiDirectorDecision | null> => {
       soundEngine.ensureInitialized();
       const res = await fetch('/api/ai-director/decide', {
@@ -479,12 +482,49 @@ export function useBattleLiveEngine(enableAudio = true) {
     []
   );
 
+  const setApprovalMode = useCallback(async (mode: 'AUTO_EXECUTE' | 'REQUIRE_APPROVAL') => {
+    const res = await fetch('/api/ai-director/approval-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approvalMode: mode }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.state) setBattleState(json.state);
+    }
+  }, []);
+
+  const submitApprovalAction = useCallback(
+    async (decisionId: string, action: 'APPROVE' | 'REJECT', executeToGeeLark = false) => {
+      soundEngine.ensureInitialized();
+      const res = await fetch('/api/ai-director/approval-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisionId, action, executeToGeeLark }),
+      });
+      const json = await res.json();
+      if (json.state) setBattleState(json.state);
+      return json;
+    },
+    []
+  );
+
+  const probeGeeLarkAndAudit = useCallback(async () => {
+    const res = await fetch('/api/geelark/probe', { method: 'POST' });
+    const json = await res.json();
+    if (json.state) setBattleState(json.state);
+    return json;
+  }, []);
+
   return {
     battleState,
     wsConnected,
     sendTikTokEvent,
     controlBattle,
     askAiDirectorNow,
+    setApprovalMode,
+    submitApprovalAction,
+    probeGeeLarkAndAudit,
     refreshState,
   };
 }

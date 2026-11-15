@@ -1,20 +1,144 @@
 [
   {
+    "eventKey": "WebcastControlMessage",
+    "rawEventName": "WebcastControlMessage",
+    "labelHe": "אירוע WebSocket שנתפס חי (WebcastControlMessage)",
+    "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
+    "category": "EXTERNAL_CUSTOM",
+    "seenCount": 2,
+    "firstSeenTs": 1794772322343,
+    "lastSeenTs": 1794772322708,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastControlMessage מחדר @victoriatick",
+    "detectedFields": [
+      "type",
+      "data"
+    ],
+    "lastPayloadPreview": "{\"type\":\"WebcastControlMessage\",\"data\":{\"common\":{\"method\":\"WebcastControlMessage\",\"msgId\":\"7708488326391008018\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772299265\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":",
+    "binding": {
+      "enabled": false,
+      "vfxId": "NONE",
+      "cameraPreset": "NONE",
+      "soundCueId": "NONE",
+      "musicTrackId": "KEEP",
+      "specialAction": "NONE",
+      "calloutTextHe": "",
+      "cooldownSec": 6,
+      "minNumericValue": 0,
+      "scope": "ALL_CONNECTED_SOCKETS",
+      "lastTriggeredTs": 0,
+      "triggeredCount": 0
+    }
+  },
+  {
+    "eventKey": "WebcastLinkMicBattleItemCard",
+    "rawEventName": "WebcastLinkMicBattleItemCard",
+    "labelHe": "שימוש בקלף קרב חי (Battle Item Card)",
+    "descriptionHe": "כפפה, ענן ערפל, הארכת זמן או קלף מיוחד בקרב",
+    "category": "CARDS_BOOSTS",
+    "seenCount": 29,
+    "firstSeenTs": 1794771056941,
+    "lastSeenTs": 1794772444902,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicBattleItemCard מחדר @khaledashur",
+    "detectedFields": [
+      "type",
+      "data"
+    ],
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicBattleItemCard\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicBattleItemCard\",\"msgId\":\"7708488917863779090\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772444400\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScor",
+    "binding": {
+      "enabled": false,
+      "vfxId": "NONE",
+      "cameraPreset": "NONE",
+      "soundCueId": "NONE",
+      "musicTrackId": "KEEP",
+      "specialAction": "NONE",
+      "calloutTextHe": "",
+      "cooldownSec": 6,
+      "minNumericValue": 0,
+      "scope": "ALL_CONNECTED_SOCKETS",
+      "lastTriggeredTs": 0,
+      "triggeredCount": 0
+    }
+  },
+  {
+    "eventKey": "WebcastBottomMessage",
+    "rawEventName": "WebcastBottomMessage",
+    "labelHe": "אירוע WebSocket שנתפס חי (WebcastBottomMessage)",
+    "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
+    "category": "EXTERNAL_CUSTOM",
+    "seenCount": 2,
+    "firstSeenTs": 1794771056136,
+    "lastSeenTs": 1794771056136,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastBottomMessage מחדר @victoriatick",
+    "detectedFields": [
+      "type",
+      "data"
+    ],
+    "lastPayloadPreview": "{\"type\":\"WebcastBottomMessage\",\"data\":{\"common\":{\"method\":\"WebcastBottomMessage\",\"msgId\":\"7708482984755790900\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794771055686\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_health_warning_banner\",\"defaultPattern",
+    "binding": {
+      "enabled": false,
+      "vfxId": "NONE",
+      "cameraPreset": "NONE",
+      "soundCueId": "NONE",
+      "musicTrackId": "KEEP",
+      "specialAction": "NONE",
+      "calloutTextHe": "",
+      "cooldownSec": 6,
+      "minNumericValue": 0,
+      "scope": "ALL_CONNECTED_SOCKETS",
+      "lastTriggeredTs": 0,
+      "triggeredCount": 0
+    }
+  },
+  {
+    "eventKey": "WebcastLinkMicBattlePunishFinish",
+    "rawEventName": "WebcastLinkMicBattlePunishFinish",
+    "labelHe": "סיום סיבוב קרב / זמן עונש (Battle Punish Finish)",
+    "descriptionHe": "מעבר מסיום הקרב לשלב התוצאה והעונש",
+    "category": "BATTLE_PK",
+    "seenCount": 1,
+    "firstSeenTs": 1794770783708,
+    "lastSeenTs": 1794770783708,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicBattlePunishFinish מחדר @khaledashur",
+    "detectedFields": [
+      "type",
+      "data"
+    ],
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicBattlePunishFinish\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicBattlePunishFinish\",\"msgId\":\"7708481772392975112\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794770782673\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prio",
+    "binding": {
+      "enabled": false,
+      "vfxId": "NONE",
+      "cameraPreset": "NONE",
+      "soundCueId": "NONE",
+      "musicTrackId": "KEEP",
+      "specialAction": "NONE",
+      "calloutTextHe": "",
+      "cooldownSec": 6,
+      "minNumericValue": 0,
+      "scope": "ALL_CONNECTED_SOCKETS",
+      "lastTriggeredTs": 0,
+      "triggeredCount": 0
+    }
+  },
+  {
     "eventKey": "WebcastLinkMessage",
     "rawEventName": "WebcastLinkMessage",
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastLinkMessage)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 1,
+    "seenCount": 2,
     "firstSeenTs": 1794743545140,
-    "lastSeenTs": 1794743545140,
-    "lastSourceLabel": "@sanya.mar",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMessage מחדר @sanya.mar",
+    "lastSeenTs": 1794772418645,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMessage מחדר @victoriatick",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLinkMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkMessage\",\"msgId\":\"7708364828062008116\",\"roomId\":\"7708360153554766610\",\"createTime\":\"1794743544597\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"\",\"m",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkMessage\",\"msgId\":\"7708488836032185362\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772417836\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"\",\"m",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -36,16 +160,16 @@
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastLinkLayerMessage)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 1,
+    "seenCount": 4,
     "firstSeenTs": 1794743545139,
-    "lastSeenTs": 1794743545139,
-    "lastSourceLabel": "@sanya.mar",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLinkLayerMessage מחדר @sanya.mar",
+    "lastSeenTs": 1794772418645,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkLayerMessage מחדר @victoriatick",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLinkLayerMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkLayerMessage\",\"msgId\":\"7708364827038860084\",\"roomId\":\"7708360153554766610\",\"createTime\":\"1794743544558\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"lo",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkLayerMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkLayerMessage\",\"msgId\":\"7708488836032070674\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772417800\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"lo",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -99,16 +223,16 @@
     "labelHe": "משימת מהירות / בונוס בקרב (Battle Task)",
     "descriptionHe": "משימת בונוס קצובה בזמן במהלך קרב PK",
     "category": "BATTLE_PK",
-    "seenCount": 1,
+    "seenCount": 23,
     "firstSeenTs": 1794743537149,
-    "lastSeenTs": 1794743537149,
-    "lastSourceLabel": "@khaledashur",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLinkmicBattleTaskMessage מחדר @khaledashur",
+    "lastSeenTs": 1794772421186,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkmicBattleTaskMessage מחדר @victoriatick",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLinkmicBattleTaskMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkmicBattleTaskMessage\",\"msgId\":\"7708364287366793985\",\"roomId\":\"7708344107806116626\",\"createTime\":\"1794743536134\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priori",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkmicBattleTaskMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkmicBattleTaskMessage\",\"msgId\":\"7708488650727770898\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772420367\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priori",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -130,16 +254,16 @@
     "labelHe": "אירוע קהל ואינטראקציה (WebcastBarrageMessage)",
     "descriptionHe": "פעילות צופים בזמן אמת מתוך צינור ה-WebSocket",
     "category": "CROWD_SOCIAL",
-    "seenCount": 9,
+    "seenCount": 42,
     "firstSeenTs": 1794743527295,
-    "lastSeenTs": 1794743544790,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastBarrageMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444377,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastBarrageMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastBarrageMessage\",\"data\":{\"common\":{\"method\":\"WebcastBarrageMessage\",\"msgId\":\"7708364824971034902\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794743544190\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":",
+    "lastPayloadPreview": "{\"type\":\"WebcastBarrageMessage\",\"data\":{\"common\":{\"method\":\"WebcastBarrageMessage\",\"msgId\":\"7708488947983483412\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772443895\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -254,16 +378,16 @@
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastImDeleteMessage)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 2,
+    "seenCount": 15,
     "firstSeenTs": 1794743520201,
-    "lastSeenTs": 1794743531106,
-    "lastSourceLabel": "@romanioli3",
-    "lastSampleSummaryHe": "נקלט פריים WebcastImDeleteMessage מחדר @romanioli3",
+    "lastSeenTs": 1794772384175,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastImDeleteMessage מחדר @victoriatick",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastImDeleteMessage\",\"data\":{\"common\":{\"method\":\"WebcastImDeleteMessage\",\"msgId\":\"7708364635786971912\",\"roomId\":\"7708353245044312884\",\"createTime\":\"1794743530440\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId",
+    "lastPayloadPreview": "{\"type\":\"WebcastImDeleteMessage\",\"data\":{\"common\":{\"method\":\"WebcastImDeleteMessage\",\"msgId\":\"7708488579385215765\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772383138\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -285,16 +409,16 @@
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastLinkMicLayoutStateMessage)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 4,
+    "seenCount": 23,
     "firstSeenTs": 1794743520147,
-    "lastSeenTs": 1794743521298,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicLayoutStateMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444380,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicLayoutStateMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicLayoutStateMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicLayoutStateMessage\",\"msgId\":\"7708358877163454998\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794742169321\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prio",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicLayoutStateMessage\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicLayoutStateMessage\",\"msgId\":\"7708477928992129554\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794769880070\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prio",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -316,16 +440,16 @@
     "labelHe": "אירוע קהל ואינטראקציה (WebcastSocialMessage)",
     "descriptionHe": "פעילות צופים בזמן אמת מתוך צינור ה-WebSocket",
     "category": "CROWD_SOCIAL",
-    "seenCount": 62,
+    "seenCount": 191,
     "firstSeenTs": 1794743519899,
-    "lastSeenTs": 1794743541959,
-    "lastSourceLabel": "@romanioli3",
-    "lastSampleSummaryHe": "נקלט פריים WebcastSocialMessage מחדר @romanioli3",
+    "lastSeenTs": 1794772443421,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastSocialMessage מחדר @victoriatick",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastSocialMessage\",\"data\":{\"common\":{\"method\":\"WebcastSocialMessage\",\"msgId\":\"7708364812506336001\",\"roomId\":\"7708353245044312884\",\"createTime\":\"1794743541460\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_guidance_share\",\"defaultPattern\":\"{0:u",
+    "lastPayloadPreview": "{\"type\":\"WebcastSocialMessage\",\"data\":{\"common\":{\"method\":\"WebcastSocialMessage\",\"msgId\":\"7708488942349273864\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772442755\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_guidance_share\",\"defaultPattern\":\"{0:u",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -347,16 +471,16 @@
     "labelHe": "אירוע מתנה ב-WebSocket (WebcastGiftMessage)",
     "descriptionHe": "שליחת מתנה/יהלומים בשידור החי",
     "category": "GIFTS_DIAMONDS",
-    "seenCount": 58,
+    "seenCount": 242,
     "firstSeenTs": 1794743519631,
-    "lastSeenTs": 1794743544790,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastGiftMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772421888,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastGiftMessage מחדר @victoriatick",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastGiftMessage\",\"data\":{\"common\":{\"method\":\"WebcastGiftMessage\",\"msgId\":\"7708364696663051030\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794743544243\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"Jade: gifted the host 1 Popular Vote\",\"displayText\":{\"key\":\"webcast_awem",
+    "lastPayloadPreview": "{\"type\":\"WebcastGiftMessage\",\"data\":{\"common\":{\"method\":\"WebcastGiftMessage\",\"msgId\":\"7708488844069227285\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772420767\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"𝑲𝑰𝑵𝑮 𝒁𝑰𝑳𝒁𝑨𝑳: gifted the host 50 Popular Vote\",\"displayText\":{\"",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -378,16 +502,16 @@
     "labelHe": "אירוע קהל ואינטראקציה (WebcastLikeMessage)",
     "descriptionHe": "פעילות צופים בזמן אמת מתוך צינור ה-WebSocket",
     "category": "CROWD_SOCIAL",
-    "seenCount": 151,
+    "seenCount": 1126,
     "firstSeenTs": 1794743519630,
-    "lastSeenTs": 1794743545140,
-    "lastSourceLabel": "@sanya.mar",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLikeMessage מחדר @sanya.mar",
+    "lastSeenTs": 1794772444901,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLikeMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLikeMessage\",\"data\":{\"common\":{\"method\":\"WebcastLikeMessage\",\"msgId\":\"7708364824480269108\",\"roomId\":\"7708360153554766610\",\"createTime\":\"1794743544413\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_msg_viewer\",\"defaultPattern\":\"{0:user} lik",
+    "lastPayloadPreview": "{\"type\":\"WebcastLikeMessage\",\"data\":{\"common\":{\"method\":\"WebcastLikeMessage\",\"msgId\":\"7708488946711347718\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772443836\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_msg_viewer\",\"defaultPattern\":\"{0:user} lik",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -409,16 +533,16 @@
     "labelHe": "אירוע קהל ואינטראקציה (WebcastRoomUserSeqMessage)",
     "descriptionHe": "פעילות צופים בזמן אמת מתוך צינור ה-WebSocket",
     "category": "CROWD_SOCIAL",
-    "seenCount": 80,
+    "seenCount": 577,
     "firstSeenTs": 1794743519630,
-    "lastSeenTs": 1794743544860,
-    "lastSourceLabel": "@04rboy10",
-    "lastSampleSummaryHe": "נקלט פריים WebcastRoomUserSeqMessage מחדר @04rboy10",
+    "lastSeenTs": 1794772444900,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastRoomUserSeqMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastRoomUserSeqMessage\",\"data\":{\"common\":{\"method\":\"WebcastRoomUserSeqMessage\",\"msgId\":\"7708364826339345184\",\"roomId\":\"7708352150887369480\",\"createTime\":\"1794743544082\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\"",
+    "lastPayloadPreview": "{\"type\":\"WebcastRoomUserSeqMessage\",\"data\":{\"common\":{\"method\":\"WebcastRoomUserSeqMessage\",\"msgId\":\"7708488951404790274\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772444229\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\"",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -440,16 +564,16 @@
     "labelHe": "אירוע קהל ואינטראקציה (WebcastMemberMessage)",
     "descriptionHe": "פעילות צופים בזמן אמת מתוך צינור ה-WebSocket",
     "category": "CROWD_SOCIAL",
-    "seenCount": 201,
+    "seenCount": 954,
     "firstSeenTs": 1794743519629,
-    "lastSeenTs": 1794743545139,
-    "lastSourceLabel": "@sanya.mar",
-    "lastSampleSummaryHe": "נקלט פריים WebcastMemberMessage מחדר @sanya.mar",
+    "lastSeenTs": 1794772444901,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastMemberMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastMemberMessage\",\"data\":{\"common\":{\"method\":\"WebcastMemberMessage\",\"msgId\":\"7708364823751789318\",\"roomId\":\"7708360153554766610\",\"createTime\":\"1794743543740\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"live_room_enter_toast\",\"defaultPattern\":\"{0:",
+    "lastPayloadPreview": "{\"type\":\"WebcastMemberMessage\",\"data\":{\"common\":{\"method\":\"WebcastMemberMessage\",\"msgId\":\"7708488946229529396\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772443929\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"live_room_enter_toast\",\"defaultPattern\":\"{0:",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -471,16 +595,16 @@
     "labelHe": "עדכון צבאות וניקוד קרב (Battle Armies)",
     "descriptionHe": "זרם ניקוד חי ותומכים מובילים משני צידי הקרב",
     "category": "BATTLE_PK",
-    "seenCount": 156,
+    "seenCount": 929,
     "firstSeenTs": 1794743519623,
-    "lastSeenTs": 1794743545139,
-    "lastSourceLabel": "@sanya.mar",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicArmies מחדר @sanya.mar",
+    "lastSeenTs": 1794772444901,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicArmies מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicArmies\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicArmies\",\"msgId\":\"7708364794626050822\",\"roomId\":\"7708360153554766610\",\"createTime\":\"1794743544058\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicArmies\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicArmies\",\"msgId\":\"7708488940596300565\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772444215\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -502,16 +626,16 @@
     "labelHe": "אירוע מתנה ב-WebSocket (WebcastGiftPanelUpdateMessage)",
     "descriptionHe": "שליחת מתנה/יהלומים בשידור החי",
     "category": "GIFTS_DIAMONDS",
-    "seenCount": 21,
+    "seenCount": 55,
     "firstSeenTs": 1794743519623,
-    "lastSeenTs": 1794743543973,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastGiftPanelUpdateMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444380,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastGiftPanelUpdateMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastGiftPanelUpdateMessage\",\"data\":{\"common\":{\"method\":\"WebcastGiftPanelUpdateMessage\",\"msgId\":\"7708364543537251094\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794743543332\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prioritySco",
+    "lastPayloadPreview": "{\"type\":\"WebcastGiftPanelUpdateMessage\",\"data\":{\"common\":{\"method\":\"WebcastGiftPanelUpdateMessage\",\"msgId\":\"7708488707728229121\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772440441\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prioritySco",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -533,16 +657,16 @@
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastLinkMicFanTicketMethod)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 19,
+    "seenCount": 37,
     "firstSeenTs": 1794743519623,
-    "lastSeenTs": 1794743541573,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicFanTicketMethod מחדר @dgdecor34",
+    "lastSeenTs": 1794772444380,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicFanTicketMethod מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicFanTicketMethod\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicFanTicketMethod\",\"msgId\":\"7708364806898141974\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794743541018\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prioritySco",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicFanTicketMethod\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicFanTicketMethod\",\"msgId\":\"7708471904633719560\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794768476245\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"prioritySco",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -564,16 +688,16 @@
     "labelHe": "אירוע מתנה ב-WebSocket (WebcastGiftDynamicRestrictionMessage)",
     "descriptionHe": "שליחת מתנה/יהלומים בשידור החי",
     "category": "GIFTS_DIAMONDS",
-    "seenCount": 12,
+    "seenCount": 30,
     "firstSeenTs": 1794743519622,
-    "lastSeenTs": 1794743521298,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastGiftDynamicRestrictionMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444380,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastGiftDynamicRestrictionMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastGiftDynamicRestrictionMessage\",\"data\":{\"common\":{\"method\":\"WebcastGiftDynamicRestrictionMessage\",\"msgId\":\"7708343686815351319\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794738742483\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"",
+    "lastPayloadPreview": "{\"type\":\"WebcastGiftDynamicRestrictionMessage\",\"data\":{\"common\":{\"method\":\"WebcastGiftDynamicRestrictionMessage\",\"msgId\":\"7708469112305074709\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794767906299\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -595,16 +719,16 @@
     "labelHe": "אירוע קהל ואינטראקציה (WebcastChatMessage)",
     "descriptionHe": "פעילות צופים בזמן אמת מתוך צינור ה-WebSocket",
     "category": "CROWD_SOCIAL",
-    "seenCount": 145,
+    "seenCount": 770,
     "firstSeenTs": 1794743519620,
-    "lastSeenTs": 1794743544791,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastChatMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444377,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastChatMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastChatMessage\",\"data\":{\"common\":{\"method\":\"WebcastChatMessage\",\"msgId\":\"7708364792146397974\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794743543767\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"2\",\"anchorFoldType\":\"2\",\"priorityScore\":\"0\",\"logId\":\"20261",
+    "lastPayloadPreview": "{\"type\":\"WebcastChatMessage\",\"data\":{\"common\":{\"method\":\"WebcastChatMessage\",\"msgId\":\"7708488919760866068\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772443331\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"2\",\"anchorFoldType\":\"2\",\"priorityScore\":\"0\",\"logId\":\"20261",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -626,16 +750,16 @@
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastRoomMessage)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 12,
+    "seenCount": 31,
     "firstSeenTs": 1794743519620,
-    "lastSeenTs": 1794743521298,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastRoomMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444364,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastRoomMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastRoomMessage\",\"data\":{\"common\":{\"method\":\"WebcastRoomMessage\",\"msgId\":\"7708344327713458966\",\"roomId\":\"7708344005738318614\",\"createTime\":\"1794738828\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_LIVE_commentFiltered_notif\",\"defaultPattern\":",
+    "lastPayloadPreview": "{\"type\":\"WebcastRoomMessage\",\"data\":{\"common\":{\"method\":\"WebcastRoomMessage\",\"msgId\":\"7708470040836131605\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794768074\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"displayText\":{\"key\":\"pm_mt_LIVE_commentFiltered_notif\",\"defaultPattern\":",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -657,16 +781,16 @@
     "labelHe": "אירוע WebSocket שנתפס חי (WebcastLiveIntroMessage)",
     "descriptionHe": "אירוע שזוהה אוטומטית מהאזנה חיה לזרם ה-WebSocket ומוכן לשיבוץ הפעלה",
     "category": "EXTERNAL_CUSTOM",
-    "seenCount": 12,
+    "seenCount": 30,
     "firstSeenTs": 1794743519619,
-    "lastSeenTs": 1794743521298,
-    "lastSourceLabel": "@dgdecor34",
-    "lastSampleSummaryHe": "נקלט פריים WebcastLiveIntroMessage מחדר @dgdecor34",
+    "lastSeenTs": 1794772444364,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLiveIntroMessage מחדר @khaledashur",
     "detectedFields": [
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastLiveIntroMessage\",\"data\":{\"common\":{\"method\":\"WebcastLiveIntroMessage\",\"msgId\":\"7632973879954721558\",\"roomId\":\"0\",\"createTime\":\"0\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"\",\"msgProcessFilterK\":\"\"",
+    "lastPayloadPreview": "{\"type\":\"WebcastLiveIntroMessage\",\"data\":{\"common\":{\"method\":\"WebcastLiveIntroMessage\",\"msgId\":\"7688307120512813831\",\"roomId\":\"0\",\"createTime\":\"0\",\"monitor\":0,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"\",\"msgProcessFilterK\":\"\"",
     "binding": {
       "enabled": false,
       "vfxId": "NONE",
@@ -688,17 +812,26 @@
     "labelHe": "פתיחת ענן הסתרת סקור (Smoke / Mist Card)",
     "descriptionHe": "מזוהה כשמופעל קלף ענן/ערפל בקרב — מפעיל אוטומטית רנטגן סקור מחדר היריב",
     "category": "CARDS_BOOSTS",
-    "seenCount": 0,
+    "seenCount": 8,
     "firstSeenTs": 1794743514838,
-    "lastSeenTs": 0,
-    "lastSourceLabel": "מוכן לקליטה חיה",
-    "lastSampleSummaryHe": "ממתין לזיהוי useSmokeCard / fuzzyDisplayConfig",
+    "lastSeenTs": 1794771325158,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נפתח ענן ערפל (SmokeCard) ל-30 שניות!",
     "detectedFields": [
       "useSmokeCard",
       "cardInfo.effectLastDuration",
-      "anchorId"
+      "anchorId",
+      "common",
+      "battleId",
+      "msgType",
+      "cardObtainGuide",
+      "useCriticalStrikeCard",
+      "awardCardNotice",
+      "useExtraTimeCard",
+      "useSpecialEffectCard",
+      "usePotionCard"
     ],
-    "lastPayloadPreview": "{}",
+    "lastPayloadPreview": "{\"common\":{\"method\":\"WebcastLinkMicBattleItemCard\",\"msgId\":\"7708484123966327559\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794771324598\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"\",\"msgProcessFilterK\":\"\",\"msgP",
     "binding": {
       "enabled": true,
       "vfxId": "VID_03_TWIN_LIGHTNING_ARCS",
@@ -710,8 +843,8 @@
       "cooldownSec": 12,
       "minNumericValue": 0,
       "scope": "ALL_CONNECTED_SOCKETS",
-      "lastTriggeredTs": 0,
-      "triggeredCount": 0
+      "lastTriggeredTs": 1794771324964,
+      "triggeredCount": 2
     }
   },
   {
@@ -720,17 +853,26 @@
     "labelHe": "פתיחת כפפת בוסט / מכה קריטית x5 (Glove Card)",
     "descriptionHe": "מזוהה ברגע פתיחת כפפה או קלף הכפלה ב-30 שניות בבאטל",
     "category": "CARDS_BOOSTS",
-    "seenCount": 0,
+    "seenCount": 21,
     "firstSeenTs": 1794743514838,
-    "lastSeenTs": 0,
-    "lastSourceLabel": "מוכן לקליטה חיה",
-    "lastSampleSummaryHe": "ממתין לזיהוי useVaultGloveCard / useCriticalStrikeCard",
+    "lastSeenTs": 1794772444902,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "הופעל קלף קרב: כפפת בוסט / מכה קריטית x5",
     "detectedFields": [
       "useVaultGloveCard",
       "useCriticalStrikeCard",
-      "cardInfo"
+      "cardInfo",
+      "common",
+      "battleId",
+      "msgType",
+      "cardObtainGuide",
+      "useSmokeCard",
+      "awardCardNotice",
+      "useExtraTimeCard",
+      "useSpecialEffectCard",
+      "usePotionCard"
     ],
-    "lastPayloadPreview": "{}",
+    "lastPayloadPreview": "{\"common\":{\"method\":\"WebcastLinkMicBattleItemCard\",\"msgId\":\"7708488917863779090\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794772444400\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"\",\"msgProcessFilterK\":\"\",\"msgP",
     "binding": {
       "enabled": true,
       "vfxId": "BEAST_09_SOLAR_TIGER",
@@ -742,8 +884,8 @@
       "cooldownSec": 15,
       "minNumericValue": 0,
       "scope": "ALL_CONNECTED_SOCKETS",
-      "lastTriggeredTs": 0,
-      "triggeredCount": 0
+      "lastTriggeredTs": 1794772444903,
+      "triggeredCount": 8
     }
   },
   {
@@ -849,18 +991,20 @@
     "labelHe": "מתנה בינונית / הרמת קצב (20–298 יהלומים)",
     "descriptionHe": "מתנות ביניים שמניעות מומנטום באמצע סיבוב",
     "category": "GIFTS_DIAMONDS",
-    "seenCount": 0,
+    "seenCount": 1,
     "firstSeenTs": 1794743514838,
-    "lastSeenTs": 0,
-    "lastSourceLabel": "מוכן לקליטה חיה",
-    "lastSampleSummaryHe": "ממתין למתנת ביניים ב-WebSocket",
+    "lastSeenTs": 1794772421888,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "𝑲𝑰𝑵𝑮 𝒁𝑰𝑳𝒁𝑨𝑳 שלח מתנה x50 (50 יהלומים)",
     "detectedFields": [
       "giftName",
       "diamondCount",
       "repeatCount",
-      "user.nickname"
+      "user.nickname",
+      "diamonds",
+      "giver"
     ],
-    "lastPayloadPreview": "{}",
+    "lastPayloadPreview": "{\"giftName\":\"מתנה\",\"repeatCount\":50,\"diamonds\":50,\"giver\":\"𝑲𝑰𝑵𝑮 𝒁𝑰𝑳𝒁𝑨𝑳\"}",
     "binding": {
       "enabled": true,
       "vfxId": "VID_07_QUAD_PYRO_FLAME_JETS",
@@ -872,8 +1016,8 @@
       "cooldownSec": 5,
       "minNumericValue": 20,
       "scope": "ALL_CONNECTED_SOCKETS",
-      "lastTriggeredTs": 0,
-      "triggeredCount": 0
+      "lastTriggeredTs": 1794772421888,
+      "triggeredCount": 1
     }
   },
   {
@@ -882,17 +1026,19 @@
     "labelHe": "פתיחת קרב PK חדש (Battle Start)",
     "descriptionHe": "מזוהה מיד כשמתחיל קרב חדש בין שני שדרנים ב-WebSocket",
     "category": "BATTLE_PK",
-    "seenCount": 0,
+    "seenCount": 5,
     "firstSeenTs": 1794743514838,
-    "lastSeenTs": 0,
-    "lastSourceLabel": "מוכן לקליטה חיה",
-    "lastSampleSummaryHe": "ממתין לתחילת קרב PK",
+    "lastSeenTs": 1794772322714,
+    "lastSourceLabel": "@victoriatick",
+    "lastSampleSummaryHe": "נקלט פריים WebcastLinkMicBattle מחדר @victoriatick",
     "detectedFields": [
       "anchorsInfo",
       "battleId",
-      "duration"
+      "duration",
+      "type",
+      "data"
     ],
-    "lastPayloadPreview": "{}",
+    "lastPayloadPreview": "{\"type\":\"WebcastLinkMicBattle\",\"data\":{\"common\":{\"method\":\"WebcastLinkMicBattle\",\"msgId\":\"7708488394979986183\",\"roomId\":\"7708470206902536968\",\"createTime\":\"1794772321513\",\"monitor\":1,\"isShowMsg\":false,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId\":\"",
     "binding": {
       "enabled": true,
       "vfxId": "VID_05_PK_FACTION_SMOKE_CLASH",
@@ -904,8 +1050,8 @@
       "cooldownSec": 15,
       "minNumericValue": 0,
       "scope": "ALL_CONNECTED_SOCKETS",
-      "lastTriggeredTs": 0,
-      "triggeredCount": 0
+      "lastTriggeredTs": 1794772322351,
+      "triggeredCount": 3
     }
   },
   {
@@ -978,11 +1124,11 @@
     "labelHe": "פתיחת תיבת אוצר / מעטפת מטבעות (Treasure Envelope)",
     "descriptionHe": "כשנזרקת תיבת אוצר בחדר וכל הצופים מתנפלים",
     "category": "RANKS_GOALS",
-    "seenCount": 4,
+    "seenCount": 6,
     "firstSeenTs": 1794743514838,
-    "lastSeenTs": 1794743545140,
-    "lastSourceLabel": "@sanya.mar",
-    "lastSampleSummaryHe": "נקלט פריים WebcastEnvelopeMessage מחדר @sanya.mar",
+    "lastSeenTs": 1794771438682,
+    "lastSourceLabel": "@khaledashur",
+    "lastSampleSummaryHe": "נקלט פריים WebcastEnvelopeMessage מחדר @khaledashur",
     "detectedFields": [
       "envelopeInfo",
       "diamondCount",
@@ -990,7 +1136,7 @@
       "type",
       "data"
     ],
-    "lastPayloadPreview": "{\"type\":\"WebcastEnvelopeMessage\",\"data\":{\"common\":{\"method\":\"WebcastEnvelopeMessage\",\"msgId\":\"7708334065812523796\",\"roomId\":\"7708360153554766610\",\"createTime\":\"1794743544719\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId",
+    "lastPayloadPreview": "{\"type\":\"WebcastEnvelopeMessage\",\"data\":{\"common\":{\"method\":\"WebcastEnvelopeMessage\",\"msgId\":\"7708463464025115444\",\"roomId\":\"7708469257524366098\",\"createTime\":\"1794771438200\",\"monitor\":0,\"isShowMsg\":true,\"describe\":\"\",\"foldType\":\"0\",\"anchorFoldType\":\"0\",\"priorityScore\":\"0\",\"logId",
     "binding": {
       "enabled": true,
       "vfxId": "GOAL_SHOCKWAVE_RING",
@@ -1002,8 +1148,8 @@
       "cooldownSec": 8,
       "minNumericValue": 0,
       "scope": "ALL_CONNECTED_SOCKETS",
-      "lastTriggeredTs": 1794743545140,
-      "triggeredCount": 2
+      "lastTriggeredTs": 1794771438682,
+      "triggeredCount": 4
     }
   },
   {

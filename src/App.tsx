@@ -12,9 +12,11 @@ import { VfxLibraryWorkspace } from './components/VfxLibraryWorkspace';
 import { TimelineAndSoundWorkspace } from './components/TimelineAndSoundWorkspace';
 import { ManifestAndQcWorkspace } from './components/ManifestAndQcWorkspace';
 import { ObsLinksModal } from './components/ObsLinksModal';
+import { AiDecisionApprovalCenter } from './components/AiDecisionApprovalCenter';
 
 type WorkspaceTab =
   | 'ai_director'
+  | 'approval_center'
   | 'tiktok_intel'
   | 'vfx_library'
   | 'timeline_sound'
@@ -32,6 +34,9 @@ export default function App() {
     sendTikTokEvent,
     controlBattle,
     askAiDirectorNow,
+    setApprovalMode,
+    submitApprovalAction,
+    probeGeeLarkAndAudit,
     refreshState,
   } = useBattleLiveEngine(isObsMode ? obsAudioEnabled : true);
 
@@ -79,6 +84,7 @@ export default function App() {
           {(
             [
               { id: 'ai_director', label: 'במאי AI ומצלמה' },
+              { id: 'approval_center', label: 'מרכז החלטות ואישורים' },
               { id: 'tiktok_intel', label: 'הזנת לייבים ולמידת AI' },
               { id: 'vfx_library', label: 'ספריית אפקטים' },
               { id: 'timeline_sound', label: 'ציר זמן וסאונד' },
@@ -125,6 +131,17 @@ export default function App() {
             refreshState={refreshState}
             onPerfSample={setPerfMetrics}
             onOpenTikTokTab={() => setActiveTab('tiktok_intel')}
+          />
+        )}
+
+        {activeTab === 'approval_center' && (
+          <AiDecisionApprovalCenter
+            battleState={battleState}
+            askAiDirectorNow={askAiDirectorNow}
+            setApprovalMode={setApprovalMode}
+            submitApprovalAction={submitApprovalAction}
+            probeGeeLarkAndAudit={probeGeeLarkAndAudit}
+            refreshState={refreshState}
           />
         )}
 

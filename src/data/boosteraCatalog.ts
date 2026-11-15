@@ -1,3 +1,11 @@
+import {
+  DecisionApprovalMode,
+  DecisionApprovalStatus,
+  IntegrationAuditReport,
+  PipelineStageLog,
+  PlannedExecutionPayload,
+} from '../engine/decisionPipeline';
+
 export type VfxLayer = 'BACK' | 'FRONT' | 'HYBRID';
 export type PlaybackMode = 'LOOP' | 'STATE_CONTINUOUS' | 'ONE_SHOT' | 'CHOREOGRAPHED';
 export type BattlePhaseId = 'IGNITION' | 'MOMENTUM' | 'PRESSURE' | 'TENSION' | 'FINALE';
@@ -90,6 +98,13 @@ export interface AiDirectorDecision {
   musicTrackId?: string | null;
   soundCueId?: string | null;
   vfxId?: string | null;
+  approvalStatus?: DecisionApprovalStatus;
+  decidedBy?: 'GEMINI' | 'OPENAI_CLAUDE_GEMINI' | 'DETERMINISTIC' | 'MANUAL';
+  approvedAt?: number | null;
+  approvedBy?: string | null;
+  executedAt?: number | null;
+  plannedPayload?: PlannedExecutionPayload | null;
+  pipelineTrace?: PipelineStageLog[];
 }
 
 export const BOOSTERA_MUSIC_TRACKS: MusicTrackSpec[] = [
@@ -917,6 +932,9 @@ export interface BattleState {
   aiMoodProfile: AiMoodProfileId;
   aiTensionScore: number;
   aiEnergyScore: number;
+  approvalMode?: DecisionApprovalMode;
+  integrationAudit?: IntegrationAuditReport;
+  geelarkDevices?: Array<{ id: string; serialName: string; status: string; envName?: string }>;
   recentChatMessages: { user: string; text: string; ts: number; source?: string; avatarUrl?: string }[];
   aiDecisions: AiDirectorDecision[];
   tiktokRoom: TikTokLiveRoomStatus;

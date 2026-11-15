@@ -1,9 +1,11 @@
 import {
+  ClaudeInspectionResult,
   DecisionApprovalMode,
   DecisionApprovalStatus,
   IntegrationAuditReport,
   PipelineStageLog,
   PlannedExecutionPayload,
+  StructuredDirectorPlan,
 } from '../engine/decisionPipeline';
 
 export type VfxLayer = 'BACK' | 'FRONT' | 'HYBRID';
@@ -90,6 +92,7 @@ export interface StandaloneSoundCue {
 export interface AiDirectorDecision {
   id: string;
   timestamp: number;
+  expiresAt?: number | null;
   streamMode: StreamMode;
   detectedSituationHe: string;
   tensionScore: number;
@@ -99,11 +102,14 @@ export interface AiDirectorDecision {
   soundCueId?: string | null;
   vfxId?: string | null;
   approvalStatus?: DecisionApprovalStatus;
-  decidedBy?: 'GEMINI' | 'OPENAI_CLAUDE_GEMINI' | 'DETERMINISTIC' | 'MANUAL';
+  councilApproved?: boolean;
+  decidedBy?: 'OPENAI_CLAUDE_COUNCIL' | 'OPENAI_CLAUDE_GEMINI' | 'DETERMINISTIC' | 'MANUAL' | 'GEMINI';
   approvedAt?: number | null;
   approvedBy?: string | null;
   executedAt?: number | null;
   plannedPayload?: PlannedExecutionPayload | null;
+  openAiPlan?: StructuredDirectorPlan | null;
+  claudeInspection?: ClaudeInspectionResult | null;
   pipelineTrace?: PipelineStageLog[];
 }
 
@@ -360,7 +366,7 @@ export interface LiveEventLogItem {
   eventType: string;
   userLabel: string;
   triggeredEffectId: string | null;
-  status: 'TRIGGERED' | 'COOLDOWN_SKIPPED' | 'ACCUMULATED';
+  status: 'TRIGGERED' | 'COOLDOWN_SKIPPED' | 'ACCUMULATED' | 'BLOCKED' | 'FAILED';
   detailHe: string;
 }
 
@@ -413,6 +419,11 @@ export interface SetupEnergyRule {
   triggerConditionHe: string;
   aiActionDirectiveEn: string;
   active: boolean;
+  approved?: boolean;
+  status?: 'PROPOSED' | 'APPROVED' | 'REJECTED';
+  version?: number;
+  approvedAt?: number | null;
+  approvedBy?: string | null;
   effectivenessScore: number;
   recommendedVfxId?: string;
   recommendedCamera?: CameraPresetId;
@@ -491,6 +502,11 @@ export interface DiscoveredStageTool {
   howItWorksHe: string;
   triggerConditionHe: string;
   autoEnabled: boolean;
+  approved?: boolean;
+  status?: 'PROPOSED' | 'APPROVED' | 'REJECTED';
+  version?: number;
+  approvedAt?: number | null;
+  approvedBy?: string | null;
   recommendedVfxId: string;
   recommendedCamera: CameraPresetId;
   recommendedSoundId: string;
@@ -900,6 +916,48 @@ export interface ChatCompanionState {
   recentDispatches: CompanionDispatchActionItem[];
 }
 
+export interface AiClientVideoState {
+  status: 'IDLE' | 'GENERATING' | 'READY' | 'FAILED';
+  sourceImageUrl?: string | null;
+  videoUrl?: string | null;
+  promptHe?: string | null;
+  errorHe?: string | null;
+  updatedAt: number;
+}
+
+export interface ProviderDiagnosticEntry {
+  requestedModel: string;
+  actualModel: string | null;
+  configured: boolean;
+  authOk: boolean;
+  modelOk: boolean;
+  ok: boolean;
+  keyDiagnostic?: {
+    present: boolean;
+    hadKeyPrefix: boolean;
+    hadBearerPrefix: boolean;
+    hadQuotes: boolean;
+    hasNonAscii: boolean;
+    length: number;
+  };
+  errorHe?: string | null;
+}
+
+export interface ProviderDiagnosticsSnapshot {
+  checkedAt: number;
+  openai: ProviderDiagnosticEntry;
+  claude: ProviderDiagnosticEntry;
+  gemini: ProviderDiagnosticEntry;
+  geelark: {
+    configured: boolean;
+    connected: boolean;
+    devicesCount: number;
+    rpaReady: boolean;
+    rpaFlowsCount: number;
+    errorHe?: string | null;
+  };
+}
+
 export interface BattleState {
   streamMode: StreamMode;
   isRunning: boolean;
@@ -934,7 +992,11 @@ export interface BattleState {
   aiEnergyScore: number;
   approvalMode?: DecisionApprovalMode;
   integrationAudit?: IntegrationAuditReport;
+  providerDiagnostics?: ProviderDiagnosticsSnapshot | null;
   geelarkDevices?: Array<{ id: string; serialName: string; status: string; envName?: string }>;
+  geelarkRpaFlows?: Array<{ id: string; title: string }>;
+  geelarkRpaReady?: boolean;
+  aiClientVideo?: AiClientVideoState;
   recentChatMessages: { user: string; text: string; ts: number; source?: string; avatarUrl?: string }[];
   aiDecisions: AiDirectorDecision[];
   tiktokRoom: TikTokLiveRoomStatus;

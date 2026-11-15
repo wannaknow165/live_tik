@@ -14,21 +14,45 @@ export function ObsLinksModal({ isOpen, onClose }: ObsLinksModalProps) {
   const origin = window.location.origin;
   const sources = [
     {
-      key: 'back',
-      titleHe: '1. שכבת רקע (BACKGROUND FX — מאחורי המגיש)',
-      descHe: 'מקם ב-OBS / TikTok Studio מתחת לשכבת המצלמה (עם חיתוך רקע למגיש) ומעל תמונת קיר האולפן.',
-      url: `${origin}/?mode=obs&layer=back`,
+      key: 'info',
+      titleHe: '1. מידע וקידומים (L8 INFO & PROMOTIONS — מופרד מ-Front VFX)',
+      descHe: 'פודיום תומכים, שובר-ענן, זרקורי משתתפים וקריאות טאפ — בשכבה עליונה נפרדת מעל הכל.',
+      url: `${origin}/?mode=obs&layer=info`,
+    },
+    {
+      key: 'ai_video',
+      titleHe: '2. וידאו AI מתמונת לקוח (L7 AI VIDEO — מוצג רק כשמוכן READY)',
+      descHe: 'מקור Browser Source ייעודי שמציג וידאו שיוצר מתמונת לקוח רק לאחר השלמת הרינדור.',
+      url: `${origin}/?mode=obs&layer=ai_video`,
+    },
+    {
+      key: 'opponent',
+      titleHe: '3. Overlay יריב מקושר (L6 OPPONENT OVERLAY)',
+      descHe: 'כרטיס סקור ונתוני קרב המקושרים אוטומטית לשם היריב הנבחר בלבד.',
+      url: `${origin}/?mode=obs&layer=opponent`,
+    },
+    {
+      key: 'tracked_front',
+      titleHe: '4. אפקטים קדמיים במעקב ראש/פנים/גוף (L5 TRACKED FRONT FX)',
+      descHe: 'אפקטי הילה, להבות ועיטורים הנצמדים לנקודות MediaPipe אמיתיות מעל המגיש.',
+      url: `${origin}/?mode=obs&layer=tracked_front`,
     },
     {
       key: 'front',
-      titleHe: '2. שכבת חזית (FOREGROUND FX — לפני המגיש)',
-      descHe: 'מקם ב-OBS מעל שכבת המצלמה עבור תותחי CO₂, ניצוצות זהב וטבעת גל ההדף המהירה.',
+      titleHe: '5. אפקטים קדמיים רגילים (L4 FRONT VFX — נקי ללא מידע/HUD)',
+      descHe: 'תותחי CO₂, ניצוצות וגלי הדף בלבד — מופרד לחלוטין משכבת המידע והקידומים.',
       url: `${origin}/?mode=obs&layer=front`,
     },
     {
+      key: 'back',
+      titleHe: '6. אפקטים אחוריים (L2 BACK VFX — מאחורי המצלמה הקיימת)',
+      descHe: 'מקם ב-OBS מתחת למצלמה הקיימת (L3) ומעל קיר האולפן הקבוע (L1).',
+      url: `${origin}/?mode=obs&layer=back`,
+    },
+    {
       key: 'composite',
-      titleHe: '3. שכבה משולבת (Single Browser Source)',
-      descHe: 'אפשרות מהירה לשכבת Overlay אחת שקופה מעל מצלמה רגילה (שומרת על מרכז 48% נקי לפני המגיש).',
+      titleHe: '7. שכבה משולבת שקופה (כל שכבות השידור לפי הסדר 1→8)',
+      descHe: 'שכבת-על מלאה בסדר הגובה המדויק (מועברת מעל המצלמה הקיימת L3 וקיר L1 ב-OBS).',
       url: `${origin}/?mode=obs&layer=composite`,
     },
   ];
@@ -41,7 +65,7 @@ export function ObsLinksModal({ isOpen, onClose }: ObsLinksModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-      <div className="bg-[#121722] border border-[#1E2636] rounded-xl max-w-2xl w-full p-6 space-y-5">
+      <div className="bg-[#121722] border border-[#1E2636] rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-5">
         <div className="flex items-center justify-between border-b border-[#1E2636] pb-3.5">
           <div>
             <h2 className="text-lg font-bold text-slate-100">

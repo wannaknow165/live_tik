@@ -13,6 +13,7 @@ import { TimelineAndSoundWorkspace } from './components/TimelineAndSoundWorkspac
 import { ManifestAndQcWorkspace } from './components/ManifestAndQcWorkspace';
 import { ObsLinksModal } from './components/ObsLinksModal';
 import { AiDecisionApprovalCenter } from './components/AiDecisionApprovalCenter';
+import { ObsLayerType } from './engine/stageLayers';
 
 type WorkspaceTab =
   | 'ai_director'
@@ -22,10 +23,23 @@ type WorkspaceTab =
   | 'timeline_sound'
   | 'manifest_qc';
 
+const VALID_OBS_LAYERS = new Set<ObsLayerType>([
+  'info',
+  'ai_video',
+  'opponent',
+  'tracked_front',
+  'front',
+  'back',
+  'composite',
+]);
+
 export default function App() {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const isObsMode = urlParams.get('mode') === 'obs';
-  const obsLayerParam = (urlParams.get('layer') || 'composite') as 'back' | 'front' | 'composite';
+  const rawObsLayer = urlParams.get('layer') || 'composite';
+  const obsLayerParam: ObsLayerType = VALID_OBS_LAYERS.has(rawObsLayer as ObsLayerType)
+    ? (rawObsLayer as ObsLayerType)
+    : 'composite';
   const obsAudioEnabled = urlParams.get('audio') !== '0';
 
   const {
@@ -37,6 +51,11 @@ export default function App() {
     setApprovalMode,
     submitApprovalAction,
     probeGeeLarkAndAudit,
+    runProviderDiagnostics,
+    approveProposal,
+    executeGeeLarkChat,
+    generateAiClientVideo,
+    clearAiClientVideo,
     refreshState,
   } = useBattleLiveEngine(isObsMode ? obsAudioEnabled : true);
 
@@ -79,7 +98,7 @@ export default function App() {
           BOOSTERA
         </a>
 
-        {/* Zone 2: 5 concise single-line text navigation links */}
+        {/* Zone 2: Concise single-line text navigation links */}
         <nav className="flex items-center gap-6 text-sm font-medium text-slate-400 overflow-x-auto">
           {(
             [
@@ -128,6 +147,9 @@ export default function App() {
             sendTikTokEvent={sendTikTokEvent}
             controlBattle={controlBattle}
             askAiDirectorNow={askAiDirectorNow}
+            generateAiClientVideo={generateAiClientVideo}
+            clearAiClientVideo={clearAiClientVideo}
+            approveProposal={approveProposal}
             refreshState={refreshState}
             onPerfSample={setPerfMetrics}
             onOpenTikTokTab={() => setActiveTab('tiktok_intel')}
@@ -141,6 +163,9 @@ export default function App() {
             setApprovalMode={setApprovalMode}
             submitApprovalAction={submitApprovalAction}
             probeGeeLarkAndAudit={probeGeeLarkAndAudit}
+            runProviderDiagnostics={runProviderDiagnostics}
+            approveProposal={approveProposal}
+            executeGeeLarkChat={executeGeeLarkChat}
             refreshState={refreshState}
           />
         )}

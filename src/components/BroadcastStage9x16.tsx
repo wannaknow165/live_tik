@@ -1,5 +1,5 @@
 import { MouseEvent, useEffect, useRef, useState } from 'react';
-import { Crown, Eye, Flame, Sparkles } from 'lucide-react';
+import { Crown, Eye, Flame, Radio, Sparkles, UserCheck } from 'lucide-react';
 import {
   BattleState,
   PresenterGestureId,
@@ -9,6 +9,16 @@ import {
 import { BoosteraVfxEngine } from '../engine/vfxRenderer';
 import { videoVfxCompositor } from '../engine/videoVfxCompositor';
 import { soundEngine } from '../engine/soundEngine';
+import {
+  BodyTrackingFrame,
+  computeTrackedVfxAnchors,
+  getObsLayerVisibility,
+  getStudioLayerVisibility,
+  ObsLayerType,
+  shouldRenderAiClientVideoLayer,
+  shouldRenderOpponentOverlay,
+} from '../engine/stageLayers';
+import { MediaPipeBodyTracker, TrackerRuntimeStatus } from '../engine/mediapipeTracker';
 
 const PRESENTER_PORTRAIT_URL = '/src/assets/images/presenter_studio_portrait_1794720719224.jpg';
 const STUDIO_BACKDROP_URL = '/src/assets/images/studio_backdrop_plate_1794720718630.jpg';
@@ -28,7 +38,7 @@ interface TapRipple {
 interface BroadcastStageProps {
   battleState: BattleState;
   obsMode?: boolean;
-  obsLayer?: 'back' | 'front' | 'composite';
+  obsLayer?: ObsLayerType;
   showSafeZone?: boolean;
   showLayerFilter?: 'both' | 'back_only' | 'front_only';
   useLiveWebcam?: boolean;
@@ -84,9 +94,17 @@ function AvatarCircle({
   );
 }
 
-function StageBroadcastHudOverlays({ battleState }: { battleState: BattleState }) {
-  const cloud = battleState.cloudRadar;
-  const showCloudXray = Boolean(cloud?.active);
+/**
+ * Layer 1 (Top): L8_INFO_PROMOTIONS (z-[70])
+ * Strictly separated from L4_STANDARD_FRONT_FX, L5_TRACKED_FRONT_FX, and L6_OPPONENT_OVERLAY.
+ */
+function StageInfoAndPromotionsLayer({
+  battleState,
+  obsMode,
+}: {
+  battleState: BattleState;
+  obsMode: boolean;
+}) {
   const showAvatars = Boolean(battleState.avatarsOverlayEnabled);
   const top3: StageSupporterAvatar[] = showAvatars ? (battleState.topSupporters || []).slice(0, 3) : [];
   const spotlights: StageAvatarSpotlight[] = showAvatars ? (battleState.avatarSpotlights || []).slice(0, 2) : [];
@@ -96,63 +114,18 @@ function StageBroadcastHudOverlays({ battleState }: { battleState: BattleState }
     spotlights.find((s) => s.side === 'RIGHT' && s.id !== leftSpot?.id) ||
     (spotlights.length > 1 && spotlights[1].id !== leftSpot?.id ? spotlights[1] : null);
 
+  const stimulusActive = battleState.tapStimulusActiveUntil > Date.now();
+
   return (
-    <div className="absolute inset-0 z-45 pointer-events-none select-none overflow-hidden" dir="rtl">
-      {/* 1. ANTI-CLOUD LIVE SCORE X-RAY OVERLAY (Triggered when Opponent uses Smoke/Mist Card!) */}
-      {showCloudXray && (
-        <div className="absolute top-2 inset-x-2 bg-[#060A13]/92 border border-cyan-400/80 rounded-lg px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
-          <div className="flex items-center justify-between gap-1.5 text-[10px] pb-1 border-b border-cyan-500/25">
-            <div className="flex items-center gap-1 text-cyan-300 font-bold truncate">
-              <Eye className="w-3 h-3 text-cyan-400 shrink-0 animate-pulse" />
-              <span className="truncate">
-                שובר-ענן חי {cloud.opponentUsername ? `(דרך @${cloud.opponentUsername})` : '(שיקוף חדר יריב)'}
-              </span>
-            </div>
-            <span className="font-mono tabular-nums text-[10px] font-bold text-amber-300 bg-amber-500/15 border border-amber-400/40 rounded px-1.5 py-0.2 shrink-0">
-              ענן {Math.ceil(cloud.remainingSec)}s
-            </span>
-          </div>
-
-          <div className="grid grid-cols-3 items-center text-center pt-1 gap-1 tabular-nums">
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
-              <div className="text-[9px] text-amber-200/80 leading-tight">הסקור שלי</div>
-              <div className="text-xs sm:text-sm font-mono font-extrabold text-amber-300 leading-tight">
-                {cloud.myTrueScore.toLocaleString()}
-              </div>
-            </div>
-
-            <div className="px-1">
-              <div className="text-[9px] text-slate-400 leading-tight">
-                {cloud.opponentRoomConnected ? 'חי מחדר יריב' : 'פער אמיתי'}
-              </div>
-              <div
-                className={`text-xs font-mono font-extrabold leading-tight ${
-                  cloud.scoreDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                }`}
-              >
-                {cloud.scoreDiff >= 0
-                  ? `+${cloud.scoreDiff.toLocaleString()}`
-                  : cloud.scoreDiff.toLocaleString()}
-              </div>
-            </div>
-
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded px-1.5 py-0.5">
-              <div className="text-[9px] text-rose-200/80 leading-tight">סקור יריב</div>
-              <div className="text-xs sm:text-sm font-mono font-extrabold text-rose-300 leading-tight">
-                {cloud.opponentTrueScore.toLocaleString()}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. TOP SAFE-ZONE SUPPORTER AVATAR PODIUM (#1 MVP CROWN, #2, #3 — Strictly Above Presenter Head) */}
+    <div
+      data-layer-id="L8_INFO_PROMOTIONS"
+      data-z-index="70"
+      className="absolute inset-0 z-[70] pointer-events-none select-none overflow-hidden"
+      dir="rtl"
+    >
+      {/* Top Safe-Zone Supporter Avatar Podium */}
       {top3.length > 0 && (
-        <div
-          className={`absolute inset-x-2 flex items-center justify-center gap-1.5 transition-all duration-300 ${
-            showCloudXray ? 'top-[76px]' : 'top-2.5'
-          }`}
-        >
+        <div className="absolute top-2.5 inset-x-2 flex items-center justify-center gap-1.5 transition-all duration-300">
           {top3.map((sup, idx) => {
             const isMvp = idx === 0;
             const ringStyle = isMvp
@@ -205,7 +178,22 @@ function StageBroadcastHudOverlays({ battleState }: { battleState: BattleState }
         </div>
       )}
 
-      {/* 3. OUTER-RAIL PARTICIPANT AVATAR SPOTLIGHTS (Strictly on Outer Edges — Presenter Face 100% Clear!) */}
+      {/* Promotions / Tap-Tap Stimulus Info Banner (Strictly in L8, NEVER inside L4 Front VFX canvas) */}
+      {(stimulusActive || battleState.likeComboCount >= 10) && (
+        <div
+          className={`absolute inset-x-8 flex flex-col items-center gap-1 ${
+            top3.length > 0 ? 'top-[54px]' : 'top-3'
+          }`}
+        >
+          <div className="px-3 py-1 rounded-full bg-[#090D16]/85 border border-amber-400/60 text-[11px] font-mono font-bold text-amber-200 shadow">
+            {stimulusActive && battleState.tapCalloutTextHe
+              ? `${battleState.tapCalloutTextHe} · x${battleState.comboMultiplier}`
+              : `COMBO STREAK x${battleState.likeComboCount}`}
+          </div>
+        </div>
+      )}
+
+      {/* Outer-Rail Participant Spotlights */}
       {leftSpot && (
         <div className="absolute left-2 bottom-12 max-w-[44%] bg-[#080C15]/90 border border-amber-400/65 rounded-xl p-1.5 backdrop-blur-sm shadow-lg flex items-center gap-2">
           <AvatarCircle
@@ -263,6 +251,149 @@ function StageBroadcastHudOverlays({ battleState }: { battleState: BattleState }
           </div>
         </div>
       )}
+
+      {/* Bottom Timecode / Battle State Info Strip (Studio or dedicated OBS Info source) */}
+      {(!obsMode || stimulusActive) && (
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3.5 py-2.5 flex items-center justify-between text-xs text-slate-200">
+          {battleState.streamMode === 'SOLO' ? (
+            <>
+              <span className="font-semibold text-amber-300">שידור סולו חי</span>
+              <span className="text-slate-300 tabular-nums">
+                רצף טאפ x{battleState.likeComboCount} · בימוי פתוח
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-mono tabular-nums font-semibold">
+                {String(Math.floor(battleState.elapsedSec / 60)).padStart(2, '0')}:
+                {String(Math.floor(battleState.elapsedSec % 60)).padStart(2, '0')} / 04:00
+              </span>
+              <span className="text-slate-300 tabular-nums">
+                {battleState.gloveRemainingSec > 0
+                  ? `כפפה x5 (${Math.ceil(battleState.gloveRemainingSec)}s)`
+                  : battleState.snipeWindowActive
+                    ? 'חלון סנייפ פעיל!'
+                    : `קומבו x${battleState.likeComboCount} · ${battleState.phase}`}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Layer 2: L7_AI_CLIENT_VIDEO (z-[60])
+ * Displays AI-generated video from client photo ONLY when status === 'READY' and videoUrl exists.
+ */
+function StageAiClientVideoLayer({ battleState }: { battleState: BattleState }) {
+  const ready = shouldRenderAiClientVideoLayer(battleState.aiClientVideo);
+  if (!ready || !battleState.aiClientVideo?.videoUrl) return null;
+
+  return (
+    <div
+      data-layer-id="L7_AI_CLIENT_VIDEO"
+      data-z-index="60"
+      className="absolute inset-0 z-[60] pointer-events-none select-none overflow-hidden"
+    >
+      <video
+        src={battleState.aiClientVideo.videoUrl}
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="w-full h-full object-cover opacity-90"
+      />
+      <div className="absolute bottom-14 right-2 px-2 py-0.5 rounded bg-black/70 border border-fuchsia-400/50 text-[10px] font-mono text-fuchsia-200">
+        AI VIDEO READY · L7
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Layer 3: L6_OPPONENT_OVERLAY (z-[50])
+ * Automatically linked strictly to selected opponent username (activeOpponentUsername / cloudRadar).
+ */
+function StageOpponentLinkedOverlayLayer({ battleState }: { battleState: BattleState }) {
+  const selectedOpponent = (
+    battleState.tiktokRoom?.activeOpponentUsername ||
+    battleState.cloudRadar?.opponentUsername ||
+    ''
+  )
+    .replace(/^@/, '')
+    .trim();
+
+  const visible = shouldRenderOpponentOverlay({
+    selectedOpponentUsername: selectedOpponent,
+    streamMode: battleState.streamMode,
+  });
+
+  if (!visible) return null;
+
+  const cloud = battleState.cloudRadar;
+  const isXrayActive = Boolean(cloud?.active);
+  const myScore = isXrayActive ? cloud.myTrueScore : battleState.myScore;
+  const oppScore = isXrayActive ? cloud.opponentTrueScore : battleState.opponentScore;
+  const diff = myScore - oppScore;
+
+  return (
+    <div
+      data-layer-id="L6_OPPONENT_OVERLAY"
+      data-z-index="50"
+      data-opponent={selectedOpponent}
+      className="absolute inset-0 z-[50] pointer-events-none select-none overflow-hidden"
+      dir="rtl"
+    >
+      <div
+        className={`absolute inset-x-2 rounded-lg px-2.5 py-1.5 shadow-lg backdrop-blur-sm border ${
+          isXrayActive
+            ? 'top-[88px] bg-[#060A13]/92 border-cyan-400/80'
+            : 'top-[88px] bg-[#080C16]/80 border-rose-400/50'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-1.5 text-[10px] pb-1 border-b border-white/10">
+          <div className="flex items-center gap-1 font-bold truncate text-cyan-200">
+            {isXrayActive ? (
+              <Eye className="w-3 h-3 text-cyan-400 shrink-0 animate-pulse" />
+            ) : (
+              <UserCheck className="w-3 h-3 text-rose-400 shrink-0" />
+            )}
+            <span className="truncate">
+              {isXrayActive ? 'שובר-ענן חי' : 'Overlay יריב מקושר'}: @{selectedOpponent}
+            </span>
+          </div>
+          <span className="font-mono tabular-nums text-[9px] font-bold text-amber-300 bg-amber-500/15 border border-amber-400/40 rounded px-1.5 py-0.2 shrink-0">
+            {isXrayActive ? `ענן ${Math.ceil(cloud.remainingSec)}s` : cloud?.opponentRoomConnected ? 'LIVE_SYNC' : 'LINKED'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-3 items-center text-center pt-1 gap-1 tabular-nums">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
+            <div className="text-[9px] text-amber-200/80 leading-tight">הניקוד שלי</div>
+            <div className="text-xs font-mono font-extrabold text-amber-300 leading-tight">
+              {myScore.toLocaleString()}
+            </div>
+          </div>
+          <div className="px-1">
+            <div className="text-[9px] text-slate-400 leading-tight">פער קרב</div>
+            <div
+              className={`text-xs font-mono font-extrabold leading-tight ${
+                diff >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}
+            >
+              {diff >= 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()}
+            </div>
+          </div>
+          <div className="bg-rose-500/10 border border-rose-500/30 rounded px-1.5 py-0.5">
+            <div className="text-[9px] text-rose-200/80 leading-tight">@{selectedOpponent}</div>
+            <div className="text-xs font-mono font-extrabold text-rose-300 leading-tight">
+              {oppScore.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -281,99 +412,102 @@ export function BroadcastStage9x16({
 }: BroadcastStageProps) {
   const backCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const frontCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const trackedCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const engineRef = useRef<BoosteraVfxEngine | null>(null);
   const stateRef = useRef<BattleState>(battleState);
   const ripplesRef = useRef<TapRipple[]>([]);
+  const trackingFrameRef = useRef<BodyTrackingFrame | null>(null);
+  const trackerRef = useRef<MediaPipeBodyTracker | null>(null);
 
   const [backdropFailed, setBackdropFailed] = useState(false);
   const [presenterFailed, setPresenterFailed] = useState(false);
+  const [trackerStatus, setTrackerStatus] = useState<TrackerRuntimeStatus>('IDLE');
+  const [trackerErrorHe, setTrackerErrorHe] = useState<string | null>(null);
 
   stateRef.current = battleState;
 
-  // Live camera feed + real-time computer-vision gesture motion detector
+  const vis = obsMode ? getObsLayerVisibility(obsLayer) : getStudioLayerVisibility(showLayerFilter);
+
+  // Live camera feed + real MediaPipe FaceLandmarker & PoseLandmarker tracking (ZERO luminance diff!)
   useEffect(() => {
-    if (!useLiveWebcam || obsMode) return;
+    if (!useLiveWebcam || obsMode) {
+      setTrackerStatus('IDLE');
+      setTrackerErrorHe(null);
+      trackingFrameRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
     let stream: MediaStream | null = null;
-    let gestureTimer: ReturnType<typeof setInterval> | null = null;
-    let prevLuma: Float32Array | null = null;
+    let detectTimer: ReturnType<typeof setInterval> | null = null;
     let lastGestureTs = 0;
 
-    const visionCanvas = document.createElement('canvas');
-    visionCanvas.width = 48;
-    visionCanvas.height = 64;
-    const visionCtx = visionCanvas.getContext('2d', { willReadFrequently: true });
+    const tracker = new MediaPipeBodyTracker();
+    trackerRef.current = tracker;
+    setTrackerStatus('INITIALIZING');
 
     navigator.mediaDevices
       ?.getUserMedia({ video: { width: { ideal: 1080 }, height: { ideal: 1920 } }, audio: false })
-      .then((s) => {
+      .then(async (s) => {
+        if (cancelled) {
+          s.getTracks().forEach((t) => t.stop());
+          return;
+        }
         stream = s;
         if (videoRef.current) {
           videoRef.current.srcObject = s;
           videoRef.current.play().catch(() => {});
         }
 
-        // Sample spatial motion zones every 200ms to detect presenter gestures
-        gestureTimer = setInterval(() => {
+        const ok = await tracker.init();
+        if (cancelled) return;
+        const snap = tracker.getSnapshot();
+        setTrackerStatus(snap.status);
+        setTrackerErrorHe(snap.errorHe);
+
+        if (!ok) {
+          return;
+        }
+
+        detectTimer = setInterval(() => {
           const vid = videoRef.current;
-          if (!vid || !visionCtx || vid.readyState < 2) return;
-          const now = Date.now();
-          if (now - lastGestureTs < 3600) return;
-
-          visionCtx.drawImage(vid, 0, 0, 48, 64);
-          const img = visionCtx.getImageData(0, 0, 48, 64).data;
-          const curr = new Float32Array(48 * 64);
-
-          let topMotion = 0;
-          let sideMotion = 0;
-          let centerMotion = 0;
-
-          for (let y = 0; y < 64; y++) {
-            for (let x = 0; x < 48; x++) {
-              const idx = y * 48 + x;
-              const p = idx * 4;
-              const luma = (img[p] * 0.299 + img[p + 1] * 0.587 + img[p + 2] * 0.114) / 255;
-              curr[idx] = luma;
-
-              if (prevLuma) {
-                const diff = Math.abs(luma - prevLuma[idx]);
-                if (diff > 0.16) {
-                  if (y < 18) topMotion += diff;
-                  else if (x < 11 || x > 36) sideMotion += diff;
-                  else if (x >= 15 && x <= 32 && y >= 20 && y <= 48) centerMotion += diff;
-                }
-              }
+          if (!vid || vid.readyState < 2) return;
+          const now = performance.now();
+          const frame = tracker.detectVideoFrame(vid, now);
+          if (frame) {
+            trackingFrameRef.current = frame;
+            const epoch = Date.now();
+            if (frame.detectedGesture && onGestureDetected && epoch - lastGestureTs > 3600) {
+              lastGestureTs = epoch;
+              onGestureDetected(frame.detectedGesture);
             }
           }
-          prevLuma = curr;
-
-          if (topMotion > 18 && onGestureDetected) {
-            lastGestureTs = now;
-            onGestureDetected('HANDS_UP_HYPE');
-          } else if (sideMotion > 24 && onGestureDetected) {
-            lastGestureTs = now;
-            onGestureDetected('TAP_CALLOUT_WAVE');
-          } else if (centerMotion > 34 && onGestureDetected) {
-            lastGestureTs = now;
-            onGestureDetected('LEAN_IN_CLOSE');
-          }
-        }, 200);
+        }, 66);
       })
       .catch(() => {
-        if (onWebcamError) {
-          onWebcamError('לא ניתן לגשת למצלמה בדפדפן — מוצגת דמות מגיש אולפן לבדיקה.');
+        if (!cancelled) {
+          setTrackerStatus('UNAVAILABLE');
+          setTrackerErrorHe('אין הרשאת מצלמה — שכבת המעקב L5 ממתינה למצלמה אמיתית.');
+          if (onWebcamError) {
+            onWebcamError('לא ניתן לגשת למצלמה בדפדפן — מוצגת מצלמת הבמה הקיימת.');
+          }
         }
       });
 
     return () => {
-      if (gestureTimer) clearInterval(gestureTimer);
+      cancelled = true;
+      if (detectTimer) clearInterval(detectTimer);
+      tracker.dispose();
+      trackerRef.current = null;
+      trackingFrameRef.current = null;
       if (stream) {
         stream.getTracks().forEach((t) => t.stop());
       }
     };
   }, [useLiveWebcam, obsMode, onWebcamError, onGestureDetected]);
 
-  // 60fps Dual-Canvas Physics, AI Kinetic Camera Rig, Screen Shake & Tactile Tap Stimulus Loop
+  // 60fps Canvas Physics (L2 Back, L4 Standard Front, L5 Tracked Front FX)
   useEffect(() => {
     const engine = new BoosteraVfxEngine();
     engineRef.current = engine;
@@ -394,6 +528,10 @@ export function BroadcastStage9x16({
       frontCanvasRef.current.width = W;
       frontCanvasRef.current.height = H;
     }
+    if (trackedCanvasRef.current) {
+      trackedCanvasRef.current.width = W;
+      trackedCanvasRef.current.height = H;
+    }
 
     function computeCameraTransform(s: BattleState, nowMs: number) {
       if (s.cameraMode === 'LOCKED') {
@@ -408,14 +546,12 @@ export function BroadcastStage9x16({
       let chromaticPx = 0;
       let vignetteAlpha = 0;
 
-      // Automatic Snipe Window Hitchcock tension push-in
       if (s.snipeWindowActive && s.streamMode === 'BATTLE') {
         const snipeProgress = Math.min(1, Math.max(0, (s.elapsedSec - 205) / 35));
         scale += snipeProgress * 0.065 * hyperMult;
         vignetteAlpha = Math.max(vignetteAlpha, snipeProgress * 0.28);
       }
 
-      // Active AI / Manual Camera Kinetic Event
       const ev = s.activeCameraEvent;
       if (ev) {
         const age = Date.now() - ev.triggeredAt;
@@ -453,7 +589,8 @@ export function BroadcastStage9x16({
       return { scale, dx, dy, rotRad, chromaticPx, vignetteAlpha };
     }
 
-    function drawFrontKineticHudAndTapStimulus(
+    // Pure visual vignette + outer edge pulses + tap ripples on L4_STANDARD_FRONT_FX (NO text/HUD info!)
+    function drawPureStandardFrontFx(
       ctx: CanvasRenderingContext2D,
       s: BattleState,
       cam: { chromaticPx: number; vignetteAlpha: number },
@@ -461,7 +598,6 @@ export function BroadcastStage9x16({
     ) {
       const nowEpoch = Date.now();
 
-      // 1. Focus / Vacuum Vignette on Outer Edges (never darkening central presenter face)
       if (cam.vignetteAlpha > 0.01) {
         const grad = ctx.createRadialGradient(W * 0.5, H * 0.5, W * 0.34, W * 0.5, H * 0.5, H * 0.62);
         grad.addColorStop(0, 'rgba(0,0,0,0)');
@@ -470,7 +606,6 @@ export function BroadcastStage9x16({
         ctx.fillRect(0, 0, W, H);
       }
 
-      // 2. Anamorphic Chromatic Edge Split Flash on Heavy Impacts
       if (cam.chromaticPx > 0.4) {
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
@@ -487,7 +622,6 @@ export function BroadcastStage9x16({
         ctx.restore();
       }
 
-      // 3. Tactile Finger-Tap Micro-Dopamine Stimulus (Outer 24% Edge Pacemaker Rings — keeps face clear!)
       const stimulusActive = s.tapStimulusActiveUntil > nowEpoch;
       if (stimulusActive || s.likeComboCount >= 15) {
         ctx.save();
@@ -510,50 +644,15 @@ export function BroadcastStage9x16({
             ctx.stroke();
           }
 
-          // Crisp tactile thumb-target core dot in safe outer margin
           const corePulse = 5 + Math.sin(nowPerf * 0.014) * 1.8;
           ctx.beginPath();
           ctx.arc(ax, anchorY, corePulse, 0, Math.PI * 2);
           ctx.fillStyle = stimulusActive ? 'rgba(253, 224, 71, 0.78)' : 'rgba(251, 191, 36, 0.42)';
           ctx.fill();
         });
-
-        // Subtle kinetic Combo Streak Meter (shifted gracefully below top HUD if active)
-        if (s.likeComboCount >= 10 || stimulusActive) {
-          const hasHudAtTop =
-            Boolean(s.cloudRadar?.active) ||
-            (Boolean(s.avatarsOverlayEnabled) && (s.topSupporters?.length || 0) > 0);
-          const barW = 190;
-          const barX = (W - barW) / 2;
-          const barY = hasHudAtTop ? (s.cloudRadar?.active ? 215 : 108) : 30;
-          const fillPct = Math.min(1, s.likeComboCount / 150);
-
-          ctx.fillStyle = 'rgba(8, 12, 20, 0.68)';
-          ctx.beginPath();
-          ctx.roundRect(barX, barY, barW, 8, 4);
-          ctx.fill();
-
-          const comboGrad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
-          comboGrad.addColorStop(0, '#F59E0B');
-          comboGrad.addColorStop(1, '#38BDF8');
-          ctx.fillStyle = comboGrad;
-          ctx.beginPath();
-          ctx.roundRect(barX, barY, Math.max(14, barW * fillPct), 8, 4);
-          ctx.fill();
-
-          ctx.font = '700 13px "JetBrains Mono", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = 'rgba(254, 243, 199, 0.92)';
-          const label =
-            stimulusActive && s.tapCalloutTextHe
-              ? `${s.tapCalloutTextHe} · x${s.comboMultiplier}`
-              : `COMBO STREAK x${s.likeComboCount}`;
-          ctx.fillText(label, W * 0.5, barY - 7);
-        }
         ctx.restore();
       }
 
-      // 4. Interactive Finger-Tap Dopamine Ripples (when user taps stage)
       ripplesRef.current = ripplesRef.current.filter((rp) => nowPerf - rp.bornAt < 680);
       if (ripplesRef.current.length > 0) {
         ctx.save();
@@ -562,20 +661,78 @@ export function BroadcastStage9x16({
           const p = (nowPerf - rp.bornAt) / 680;
           const radius = 10 + p * 78;
           const alpha = Math.pow(1 - p, 1.5) * 0.85;
-
           ctx.beginPath();
           ctx.arc(rp.x, rp.y, radius, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(251, 191, 36, ${alpha.toFixed(3)})`;
           ctx.lineWidth = 3 * (1 - p);
           ctx.stroke();
-
-          ctx.font = '700 15px "JetBrains Mono", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = `rgba(254, 249, 195, ${alpha.toFixed(3)})`;
-          ctx.fillText(rp.comboLabel, rp.x, rp.y - 14 - p * 36);
         }
         ctx.restore();
       }
+    }
+
+    // Layer 4 (L5_TRACKED_FRONT_FX): Draws ONLY when real MediaPipe head/face/body anchors exist
+    function drawTrackedBodyFrontFx(
+      ctx: CanvasRenderingContext2D,
+      frame: BodyTrackingFrame | null,
+      nowPerf: number
+    ) {
+      const anchors = computeTrackedVfxAnchors(frame, W, H);
+      if (!anchors.active) return;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const pulse = 0.75 + Math.sin(nowPerf * 0.008) * 0.25;
+
+      // Head Crown Halo anchored strictly above tracked forehead
+      if (anchors.headCrownPx) {
+        const rx = Math.max(36, anchors.faceRadiusPx * 0.95);
+        const ry = Math.max(12, rx * 0.28);
+        ctx.strokeStyle = `rgba(251, 191, 36, ${(0.82 * pulse).toFixed(2)})`;
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.ellipse(anchors.headCrownPx.x, anchors.headCrownPx.y - 12, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = `rgba(56, 189, 248, ${(0.45 * pulse).toFixed(2)})`;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.ellipse(anchors.headCrownPx.x, anchors.headCrownPx.y - 16, rx * 1.18, ry * 1.2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Cheek/Temple energy sparks aligned with real face landmarks
+      [anchors.leftTemplePx, anchors.rightTemplePx].forEach((pt, idx) => {
+        if (!pt) return;
+        const grad = ctx.createRadialGradient(pt.x, pt.y, 2, pt.x, pt.y, 26);
+        grad.addColorStop(0, idx === 0 ? 'rgba(251,191,36,0.75)' : 'rgba(56,189,248,0.75)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 26, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Shoulder energy aura wings anchored to tracked left/right shoulders
+      [anchors.leftShoulderPx, anchors.rightShoulderPx].forEach((sh, idx) => {
+        if (!sh) return;
+        const r = Math.max(26, anchors.shoulderSpanPx * 0.22);
+        const grad = ctx.createRadialGradient(sh.x, sh.y, 4, sh.x, sh.y, r);
+        grad.addColorStop(0, anchors.handsRaised ? 'rgba(244,63,94,0.65)' : 'rgba(56,189,248,0.48)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(sh.x, sh.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = idx === 0 ? 'rgba(251,191,36,0.45)' : 'rgba(56,189,248,0.45)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sh.x, sh.y, r * 0.68, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      ctx.restore();
     }
 
     function tick(now: number) {
@@ -595,16 +752,13 @@ export function BroadcastStage9x16({
       engine.step(W, H, renderInput, now);
       const cam = computeCameraTransform(s, now);
 
-      const renderBack =
-        obsMode ? obsLayer === 'back' || obsLayer === 'composite' : showLayerFilter !== 'front_only';
-      const renderFront =
-        obsMode ? obsLayer === 'front' || obsLayer === 'composite' : showLayerFilter !== 'back_only';
+      const layerVis = obsMode ? getObsLayerVisibility(obsLayer) : getStudioLayerVisibility(showLayerFilter);
 
       if (backCanvasRef.current) {
         const bCtx = backCanvasRef.current.getContext('2d', { alpha: true });
         if (bCtx) {
           bCtx.clearRect(0, 0, W, H);
-          if (renderBack) {
+          if (layerVis.L2_BACK_FX) {
             bCtx.save();
             bCtx.translate(W * 0.5 + cam.dx, H * 0.5 + cam.dy);
             bCtx.rotate(cam.rotRad);
@@ -621,7 +775,7 @@ export function BroadcastStage9x16({
         const fCtx = frontCanvasRef.current.getContext('2d', { alpha: true });
         if (fCtx) {
           fCtx.clearRect(0, 0, W, H);
-          if (renderFront) {
+          if (layerVis.L4_STANDARD_FRONT_FX) {
             fCtx.save();
             fCtx.translate(W * 0.5 + cam.dx, H * 0.5 + cam.dy);
             fCtx.rotate(cam.rotRad);
@@ -631,7 +785,17 @@ export function BroadcastStage9x16({
             videoVfxCompositor.renderActiveVideoLayer(fCtx, W, H, 'FRONT', s.activeEffects);
             fCtx.restore();
 
-            drawFrontKineticHudAndTapStimulus(fCtx, s, cam, now);
+            drawPureStandardFrontFx(fCtx, s, cam, now);
+          }
+        }
+      }
+
+      if (trackedCanvasRef.current) {
+        const tCtx = trackedCanvasRef.current.getContext('2d', { alpha: true });
+        if (tCtx) {
+          tCtx.clearRect(0, 0, W, H);
+          if (layerVis.L5_TRACKED_FRONT_FX && trackingFrameRef.current) {
+            drawTrackedBodyFrontFx(tCtx, trackingFrameRef.current, now);
           }
         }
       }
@@ -690,22 +854,43 @@ export function BroadcastStage9x16({
   if (obsMode) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-transparent pointer-events-none select-none">
-        <div className="relative h-screen aspect-[9/16] max-w-full bg-transparent overflow-hidden">
-          {(obsLayer === 'back' || obsLayer === 'composite') && (
-            <canvas ref={backCanvasRef} className="absolute inset-0 w-full h-full z-10" />
+        <div
+          data-stage-mode="obs"
+          data-obs-layer={obsLayer}
+          className="relative h-screen aspect-[9/16] max-w-full bg-transparent overflow-hidden"
+        >
+          {vis.L2_BACK_FX && (
+            <canvas
+              ref={backCanvasRef}
+              data-layer-id="L2_BACK_FX"
+              data-z-index="20"
+              className="absolute inset-0 w-full h-full z-[20] pointer-events-none"
+            />
           )}
-          {(obsLayer === 'front' || obsLayer === 'composite') && (
-            <>
-              <canvas ref={frontCanvasRef} className="absolute inset-0 w-full h-full z-30" />
-              <StageBroadcastHudOverlays battleState={battleState} />
-            </>
+          {vis.L4_STANDARD_FRONT_FX && (
+            <canvas
+              ref={frontCanvasRef}
+              data-layer-id="L4_STANDARD_FRONT_FX"
+              data-z-index="40"
+              className="absolute inset-0 w-full h-full z-[40] pointer-events-none"
+            />
           )}
+          {vis.L5_TRACKED_FRONT_FX && (
+            <canvas
+              ref={trackedCanvasRef}
+              data-layer-id="L5_TRACKED_FRONT_FX"
+              data-z-index="45"
+              className="absolute inset-0 w-full h-full z-[45] pointer-events-none"
+            />
+          )}
+          {vis.L6_OPPONENT_OVERLAY && <StageOpponentLinkedOverlayLayer battleState={battleState} />}
+          {vis.L7_AI_CLIENT_VIDEO && <StageAiClientVideoLayer battleState={battleState} />}
+          {vis.L8_INFO_PROMOTIONS && <StageInfoAndPromotionsLayer battleState={battleState} obsMode />}
         </div>
       </div>
     );
   }
 
-  // Discrete Tailwind camera rig classes for preview presenter & studio plate
   const camActive =
     battleState.activeCameraEvent &&
     Date.now() - battleState.activeCameraEvent.triggeredAt < battleState.activeCameraEvent.durationMs
@@ -726,58 +911,115 @@ export function BroadcastStage9x16({
   return (
     <div
       onClick={handleInteractiveStageTap}
+      data-stage-mode="studio"
       title="לחץ על המסך לבדיקת גירוי אצבע (Tap-Tap Dopamine) ורצף לייקים חי!"
       className="relative w-full max-w-[360px] mx-auto aspect-[9/16] rounded-xl overflow-hidden border border-[#1E2636] bg-[#07090E] select-none cursor-pointer"
     >
-      {/* Z-10: Permanent Dark Studio Wall Backdrop */}
-      {!backdropFailed ? (
-        <img
-          src={STUDIO_BACKDROP_URL}
-          alt="רקע קיר אולפן שידור כהה"
-          referrerPolicy="no-referrer"
-          onError={() => setBackdropFailed(true)}
-          className={`absolute inset-0 w-full h-full object-cover opacity-55 z-10 ${presenterKineticClass}`}
-        />
-      ) : (
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0F141F] via-[#090C12] to-[#05070B] z-10" />
+      {/* LAYER 8 (Bottom): L1_PERMANENT_WALL (z-[10]) */}
+      {vis.L1_PERMANENT_WALL && (
+        <div
+          data-layer-id="L1_PERMANENT_WALL"
+          data-z-index="10"
+          className="absolute inset-0 z-[10] pointer-events-none"
+        >
+          {!backdropFailed ? (
+            <img
+              src={STUDIO_BACKDROP_URL}
+              alt="קיר אולפן קבוע"
+              referrerPolicy="no-referrer"
+              onError={() => setBackdropFailed(true)}
+              className={`w-full h-full object-cover opacity-55 ${presenterKineticClass}`}
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-b from-[#0F141F] via-[#090C12] to-[#05070B]" />
+          )}
+        </div>
       )}
 
-      {/* Z-20: BACKGROUND FX LAYER */}
-      <canvas ref={backCanvasRef} className="absolute inset-0 w-full h-full z-20 pointer-events-none" />
+      {/* LAYER 7: L2_BACK_FX (z-[20]) */}
+      {vis.L2_BACK_FX && (
+        <canvas
+          ref={backCanvasRef}
+          data-layer-id="L2_BACK_FX"
+          data-z-index="20"
+          className="absolute inset-0 w-full h-full z-[20] pointer-events-none"
+        />
+      )}
 
-      {/* Z-30: Presenter Layer */}
-      <div className={`absolute inset-0 z-30 pointer-events-none flex items-end justify-center ${presenterKineticClass}`}>
-        {useLiveWebcam ? (
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            className="w-full h-full object-cover [mask-image:radial-gradient(ellipse_44%_52%_at_50%_54%,#000_64%,transparent_100%)]"
-          />
-        ) : !presenterFailed ? (
-          <img
-            src={PRESENTER_PORTRAIT_URL}
-            alt="מגיש שידור חי במרכז הפריים"
-            referrerPolicy="no-referrer"
-            onError={() => setPresenterFailed(true)}
-            className="w-full h-full object-cover [mask-image:radial-gradient(ellipse_43%_50%_at_50%_56%,#000_66%,transparent_100%)]"
-          />
-        ) : (
-          <div className="w-[48%] h-[68%] mb-6 rounded-t-full bg-gradient-to-b from-slate-700/70 to-slate-900/90 border border-slate-600/30 flex items-center justify-center text-xs text-slate-300">
-            מגיש שידור (אזור מרכזי)
-          </div>
-        )}
-      </div>
+      {/* LAYER 6: L3_PRESENTER_CAMERA (z-[30]) — Existing Presenter Camera Preserved Untouched */}
+      {vis.L3_PRESENTER_CAMERA && (
+        <div
+          data-layer-id="L3_PRESENTER_CAMERA"
+          data-z-index="30"
+          className={`absolute inset-0 z-[30] pointer-events-none flex items-end justify-center ${presenterKineticClass}`}
+        >
+          {useLiveWebcam ? (
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              className="w-full h-full object-cover [mask-image:radial-gradient(ellipse_44%_52%_at_50%_54%,#000_64%,transparent_100%)]"
+            />
+          ) : !presenterFailed ? (
+            <img
+              src={PRESENTER_PORTRAIT_URL}
+              alt="המצלמה הקיימת — מגיש שידור חי במרכז הפריים"
+              referrerPolicy="no-referrer"
+              onError={() => setPresenterFailed(true)}
+              className="w-full h-full object-cover [mask-image:radial-gradient(ellipse_43%_50%_at_50%_56%,#000_66%,transparent_100%)]"
+            />
+          ) : (
+            <div className="w-[48%] h-[68%] mb-6 rounded-t-full bg-gradient-to-b from-slate-700/70 to-slate-900/90 border border-slate-600/30 flex items-center justify-center text-xs text-slate-300">
+              המצלמה הקיימת (אזור מרכזי)
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Z-40: FOREGROUND FX + TACTILE TAP-DOPAMINE LAYER */}
-      <canvas ref={frontCanvasRef} className="absolute inset-0 w-full h-full z-40 pointer-events-none" />
+      {/* LAYER 5: L4_STANDARD_FRONT_FX (z-[40]) */}
+      {vis.L4_STANDARD_FRONT_FX && (
+        <canvas
+          ref={frontCanvasRef}
+          data-layer-id="L4_STANDARD_FRONT_FX"
+          data-z-index="40"
+          className="absolute inset-0 w-full h-full z-[40] pointer-events-none"
+        />
+      )}
 
-      {/* Z-45: BROADCAST SUPPORTER AVATARS + ANTI-CLOUD SCORE X-RAY OVERLAY */}
-      {showLayerFilter !== 'back_only' && <StageBroadcastHudOverlays battleState={battleState} />}
+      {/* LAYER 4: L5_TRACKED_FRONT_FX (z-[45]) — MediaPipe Head/Face/Body Tracked Effects */}
+      {vis.L5_TRACKED_FRONT_FX && (
+        <div
+          data-layer-id="L5_TRACKED_FRONT_FX"
+          data-z-index="45"
+          data-tracking-status={trackerStatus}
+          className="absolute inset-0 z-[45] pointer-events-none"
+        >
+          <canvas ref={trackedCanvasRef} className="w-full h-full" />
+          {useLiveWebcam && trackerStatus !== 'LIVE_TRACKING' && (
+            <div className="absolute bottom-11 left-2 right-2 px-2 py-1 rounded bg-black/75 border border-amber-500/40 text-[10px] text-amber-200 flex items-center gap-1.5">
+              <Radio className="w-3 h-3 shrink-0" />
+              <span className="truncate">
+                {trackerStatus === 'INITIALIZING'
+                  ? 'טוען מודלי MediaPipe למעקב ראש/פנים/גוף...'
+                  : trackerErrorHe || 'מעקב MediaPipe לא זמין (ללא זיוף בהירות)'}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Z-50: Optional Broadcast Safe-Zone Calibration Grid */}
+      {/* LAYER 3: L6_OPPONENT_OVERLAY (z-[50]) */}
+      {vis.L6_OPPONENT_OVERLAY && <StageOpponentLinkedOverlayLayer battleState={battleState} />}
+
+      {/* LAYER 2: L7_AI_CLIENT_VIDEO (z-[60]) */}
+      {vis.L7_AI_CLIENT_VIDEO && <StageAiClientVideoLayer battleState={battleState} />}
+
+      {/* LAYER 1 (Top): L8_INFO_PROMOTIONS (z-[70]) */}
+      {vis.L8_INFO_PROMOTIONS && <StageInfoAndPromotionsLayer battleState={battleState} obsMode={false} />}
+
+      {/* Optional Calibration Grid Overlay */}
       {showSafeZone && (
-        <div className="absolute inset-0 z-50 pointer-events-none">
+        <div className="absolute inset-0 z-[80] pointer-events-none">
           <div className="absolute inset-y-0 left-[26%] right-[26%] border-x border-dashed border-amber-400/70 bg-amber-500/[0.04] flex flex-col justify-between p-2">
             <span className="text-[11px] font-mono text-amber-300 bg-black/70 px-1.5 py-0.5 rounded self-center">
               SAFE ZONE 48% (פני מגיש)
@@ -788,32 +1030,6 @@ export function BroadcastStage9x16({
           </div>
         </div>
       )}
-
-      {/* Minimal Measured Scrim at bottom for clean studio timecode & combo readout */}
-      <div className="absolute inset-x-0 bottom-0 z-45 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3.5 py-2.5 flex items-center justify-between text-xs text-slate-200 pointer-events-none">
-        {battleState.streamMode === 'SOLO' ? (
-          <>
-            <span className="font-semibold text-amber-300">שידור סולו חי</span>
-            <span className="text-slate-300 tabular-nums">
-              רצף טאפ x{battleState.likeComboCount} · בימוי פתוח
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="font-mono tabular-nums font-semibold">
-              {String(Math.floor(battleState.elapsedSec / 60)).padStart(2, '0')}:
-              {String(Math.floor(battleState.elapsedSec % 60)).padStart(2, '0')} / 04:00
-            </span>
-            <span className="text-slate-300 tabular-nums">
-              {battleState.gloveRemainingSec > 0
-                ? `כפפה x5 (${Math.ceil(battleState.gloveRemainingSec)}s)`
-                : battleState.snipeWindowActive
-                  ? 'חלון סנייפ פעיל!'
-                  : `קומבו x${battleState.likeComboCount} · ${battleState.phase}`}
-            </span>
-          </>
-        )}
-      </div>
     </div>
   );
 }

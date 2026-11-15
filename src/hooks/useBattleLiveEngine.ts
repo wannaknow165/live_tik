@@ -46,6 +46,10 @@ const INITIAL_FALLBACK_STATE: BattleState = {
   aiEnergyScore: 40,
   approvalMode: 'AUTO_EXECUTE',
   geelarkDevices: [],
+  geelarkRpaFlows: [],
+  geelarkRpaReady: false,
+  aiClientVideo: { status: 'IDLE', updatedAt: 0 },
+  providerDiagnostics: null,
   recentChatMessages: [],
   aiDecisions: [],
   tiktokRoom: {
@@ -474,10 +478,9 @@ export function useBattleLiveEngine(enableAudio = true) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) return null;
-      const json = await res.json();
-      if (json.state) setBattleState(json.state);
-      return json.decision || null;
+      const json = await res.json().catch(() => null);
+      if (json?.state) setBattleState(json.state);
+      return json?.decision || null;
     },
     []
   );
@@ -516,6 +519,67 @@ export function useBattleLiveEngine(enableAudio = true) {
     return json;
   }, []);
 
+  const runProviderDiagnostics = useCallback(async () => {
+    const res = await fetch('/api/integrations/test-providers', { method: 'POST' });
+    const json = await res.json();
+    if (json.state) setBattleState(json.state);
+    return json;
+  }, []);
+
+  const approveProposal = useCallback(
+    async (kind: 'rule' | 'tool' | 'ws_binding', id: string, action: 'APPROVE' | 'REJECT') => {
+      const res = await fetch('/api/memory/approve-proposal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, id, action }),
+      });
+      const json = await res.json();
+      if (json.state) setBattleState(json.state);
+      return json;
+    },
+    []
+  );
+
+  const executeGeeLarkChat = useCallback(
+    async (payload: {
+      messageText: string;
+      deviceId?: string;
+      targetRoomUsername: string;
+      confirmedOwnedRoom?: boolean;
+    }) => {
+      const res = await fetch('/api/geelark/execute-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.state) setBattleState(json.state);
+      return json;
+    },
+    []
+  );
+
+  const generateAiClientVideo = useCallback(
+    async (payload: { imageBase64: string; mimeType?: string; promptHe?: string }) => {
+      const res = await fetch('/api/ai-video/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.state) setBattleState(json.state);
+      return json;
+    },
+    []
+  );
+
+  const clearAiClientVideo = useCallback(async () => {
+    const res = await fetch('/api/ai-video/clear', { method: 'POST' });
+    const json = await res.json();
+    if (json.state) setBattleState(json.state);
+    return json;
+  }, []);
+
   return {
     battleState,
     wsConnected,
@@ -525,6 +589,11 @@ export function useBattleLiveEngine(enableAudio = true) {
     setApprovalMode,
     submitApprovalAction,
     probeGeeLarkAndAudit,
+    runProviderDiagnostics,
+    approveProposal,
+    executeGeeLarkChat,
+    generateAiClientVideo,
+    clearAiClientVideo,
     refreshState,
   };
 }

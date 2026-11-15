@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   Cpu,
+  MessageSquareShare,
   Play,
   RefreshCw,
   ShieldAlert,
@@ -12,6 +13,7 @@ import {
   Smartphone,
   ThumbsDown,
   ThumbsUp,
+  Wrench,
   XCircle,
 } from 'lucide-react';
 import { AiDirectorDecision, BattleState } from '../data/boosteraCatalog';
@@ -34,6 +36,18 @@ interface AiDecisionApprovalCenterProps {
     executeToGeeLark?: boolean
   ) => Promise<{ ok?: boolean; errorHe?: string }>;
   probeGeeLarkAndAudit: () => Promise<unknown>;
+  runProviderDiagnostics: () => Promise<unknown>;
+  approveProposal: (
+    kind: 'rule' | 'tool' | 'ws_binding',
+    id: string,
+    action: 'APPROVE' | 'REJECT'
+  ) => Promise<{ ok?: boolean; errorHe?: string }>;
+  executeGeeLarkChat: (payload: {
+    messageText: string;
+    deviceId?: string;
+    targetRoomUsername: string;
+    confirmedOwnedRoom?: boolean;
+  }) => Promise<{ ok?: boolean; status?: string; taskId?: string | null; errorHe?: string; detailHe?: string }>;
   refreshState: () => Promise<void>;
 }
 
@@ -97,6 +111,9 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
   setApprovalMode,
   submitApprovalAction,
   probeGeeLarkAndAudit,
+  runProviderDiagnostics,
+  approveProposal,
+  executeGeeLarkChat,
   refreshState,
 }) => {
   const decisions = battleState.aiDecisions || [];
@@ -104,7 +121,16 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
   const [promptInput, setPromptInput] = useState<string>('');
   const [busyAction, setBusyAction] = useState<boolean>(false);
   const [probing, setProbing] = useState<boolean>(false);
+  const [testingProviders, setTestingProviders] = useState<boolean>(false);
   const [statusBannerHe, setStatusBannerHe] = useState<string | null>(null);
+
+  // Owned-Room Safe GeeLark Execution Form
+  const [geelarkRoomInput, setGeelarkRoomInput] = useState<string>(
+    battleState.integrationAudit?.tiktokAccount.ownedRoomUsername || ''
+  );
+  const [geelarkMsgInput, setGeelarkMsgInput] = useState<string>('בדיקת שידור אולפן BOOSTERA!');
+  const [confirmedOwnedRoom, setConfirmedOwnedRoom] = useState<boolean>(false);
+  const [geelarkExecResultHe, setGeelarkExecResultHe] = useState<string | null>(null);
 
   useEffect(() => {
     if (decisions.length > 0 && (!selectedId || !decisions.some((d) => d.id === selectedId))) {
@@ -122,8 +148,19 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
     [decisions]
   );
 
+  const proposedRules = useMemo(
+    () => (battleState.memorySummary?.energyRules || []).filter((r) => r.status !== 'APPROVED' || r.approved !== true),
+    [battleState.memorySummary?.energyRules]
+  );
+
+  const proposedTools = useMemo(
+    () => (battleState.memorySummary?.discoveredTools || []).filter((t) => t.status !== 'APPROVED' || t.approved !== true),
+    [battleState.memorySummary?.discoveredTools]
+  );
+
   const audit = battleState.integrationAudit;
-  const approvalMode: DecisionApprovalMode = battleState.approvalMode || 'AUTO_EXECUTE';
+  const diag = battleState.providerDiagnostics;
+  const approvalMode: DecisionApprovalMode = battleState.approvalMode || 'REQUIRE_APPROVAL';
 
   const handleGenerateApprovalCandidate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -134,12 +171,16 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
         requireApproval: true,
         directorPromptHe:
           promptInput.trim() ||
-          'נתח את מצב הלייב הנוכחי והפק המלצת בימוי מובנית הממתינה לאישור מפעיל.',
+          'נתח את מצב הלייב הנוכחי והפק תוכנית מובנית במועצת OpenAI + Claude לשער האישור.',
       });
       if (dec) {
         setSelectedId(dec.id);
         setPromptInput('');
-        setStatusBannerHe(`נוצרה החלטה חדשה (${dec.id}) בסטטוס המתנה לאישור.`);
+        if (dec.approvalStatus === 'COUNCIL_BLOCKED') {
+          setStatusBannerHe(`המועצה בלמה את ההחלטה (${dec.id}): ${dec.detectedSituationHe}`);
+        } else {
+          setStatusBannerHe(`נוצרה תוכנית מועצה (${dec.id}) בסטטוס ${dec.approvalStatus}.`);
+        }
       }
     } finally {
       setBusyAction(false);
@@ -171,29 +212,61 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
     try {
       await probeGeeLarkAndAudit();
       await refreshState();
-      setStatusBannerHe('בדיקת החיבורים (GeeLark, TikTok, AI Providers) עודכנה בזמן אמת.');
+      setStatusBannerHe('בדיקת החיבורים (GeeLark + RPA, TikTok, מועצת AI) עודכנה בזמן אמת.');
     } finally {
       setProbing(false);
     }
   };
 
+  const handleRunProviderDiagnostics = async () => {
+    setTestingProviders(true);
+    setStatusBannerHe(null);
+    try {
+      await runProviderDiagnostics();
+      await refreshState();
+      setStatusBannerHe('הושלמה בדיקת אימות מפתחות ומודלים נפרדת (OpenAI, Anthropic Auth/Model, Gemini, GeeLark).');
+    } finally {
+      setTestingProviders(false);
+    }
+  };
+
+  const handleGeeLarkChatExecute = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusyAction(true);
+    setGeelarkExecResultHe(null);
+    try {
+      const res = await executeGeeLarkChat({
+        messageText: geelarkMsgInput.trim(),
+        targetRoomUsername: geelarkRoomInput.trim(),
+        confirmedOwnedRoom,
+      });
+      if (res.ok) {
+        setGeelarkExecResultHe(res.detailHe || `בוצע בהצלחה (taskId=${res.taskId || 'sent'})`);
+      } else {
+        setGeelarkExecResultHe(`${res.status || 'FAILED'}: ${res.errorHe || 'שגיאה בביצוע GeeLark'}`);
+      }
+    } finally {
+      setBusyAction(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Top Header & Controls */}
+      {/* Top Header & Server Approval Gate Controls */}
       <section className="bg-[#121722] border border-[#1E2636] rounded-xl p-5 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5 flex-wrap">
               <ShieldCheck className="w-5 h-5 text-amber-400" />
               <h1 className="text-xl font-bold font-display text-slate-100">
-                AI Decision &amp; Approval Center
+                AI Decision &amp; Approval Center (מועצת OpenAI + Claude ואכיפת שרת)
               </h1>
               <span className="px-2.5 py-0.5 rounded border border-[#263248] bg-[#0B0E14] text-xs font-mono text-slate-300">
                 ממתינים לאישור: {pendingCount}
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              מעקב שקוף מקצה לקצה אחר מסלול ההחלטה: LIVE → DATA → OPENAI → CLAUDE → GEMINI → DECISION → APPROVAL → EXECUTION → RESULT, ללא הצגת הדמיות כפעולה אמיתית.
+              OpenAI מתכנן · Claude מבקר ובולם אי־הסכמה · Gemini אוסף ומבצע תוכנית מאושרת בלבד · ללא עקיפת אישורים מהלקוח וללא הדמיות.
             </p>
           </div>
 
@@ -208,7 +281,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                ביצוע אוטומטי
+                ביצוע מאושר-מועצה
               </button>
               <button
                 type="button"
@@ -219,9 +292,19 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                שער אישור ידני
+                שער אישור שרת קשיח
               </button>
             </div>
+
+            <button
+              type="button"
+              disabled={testingProviders}
+              onClick={handleRunProviderDiagnostics}
+              className="px-3.5 py-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 hover:bg-cyan-500/25 text-xs font-semibold text-cyan-200 flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Cpu className={`w-3.5 h-3.5 ${testingProviders ? 'animate-spin' : ''}`} />
+              <span>{testingProviders ? 'בודק מודלים ומפתחות...' : 'בדוק ספקים ודגמים עכשיו'}</span>
+            </button>
 
             <button
               type="button"
@@ -230,7 +313,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
               className="px-3.5 py-2 rounded-lg bg-[#0B0E14] border border-[#283246] hover:border-slate-500 text-xs font-semibold text-slate-200 flex items-center gap-1.5 disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${probing ? 'animate-spin' : ''}`} />
-              <span>אמת חיבורים עכשיו</span>
+              <span>אמת GeeLark ו-WebCast</span>
             </button>
           </div>
         </div>
@@ -240,8 +323,8 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
             type="text"
             value={promptInput}
             onChange={(e) => setPromptInput(e.target.value)}
-            aria-label="הנחיה להחלטת AI לבדיקה ואישור"
-            placeholder="הזן תרחיש או הנחיה ליצירת החלטה הממתינה לאישור (למשל: דחוף סנייפ 15 שניות לסיום)..."
+            aria-label="הנחיה להחלטת מועצה לבדיקה ואישור"
+            placeholder="הזן תרחיש למועצת OpenAI + Claude (בכשל/דחייה/אי-הסכמה התוכנית נעצרת ללא מעבר ל-Gemini)..."
             className="flex-1 min-w-[240px] bg-[#0B0E14] border border-[#283246] rounded-lg px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
           />
           <button
@@ -250,7 +333,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
             className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-bold flex items-center gap-1.5 shrink-0"
           >
             <Play className="w-3.5 h-3.5" />
-            <span>הפק החלטה לשער האישור</span>
+            <span>הרץ מועצת החלטות לשער האישור</span>
           </button>
         </form>
 
@@ -268,30 +351,36 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
         )}
       </section>
 
-      {/* Live Infrastructure & Permission Audit (Honest, Zero Fakes) */}
+      {/* Live Model Diagnostics & Infrastructure Audit (Requested vs Actual, Separated Auth vs Model) */}
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* 1. GeeLark Device Status */}
+        {/* 1. GeeLark Device & RPA Flow Audit */}
         <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
               <Smartphone className="w-4 h-4 text-cyan-400" />
-              1. מכשיר ענן GeeLark
+              1. מכשיר GeeLark ויכולת RPA
             </span>
             <span
               className={`px-2 py-0.5 rounded border text-[10px] font-mono ${
-                audit?.geelark.connected
+                audit?.geelark.connected && audit?.geelark.rpaReady
                   ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                  : audit?.geelark.connected
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : 'bg-slate-900 border-slate-700 text-slate-400'
               }`}
             >
-              {audit?.geelark.connected ? 'CONNECTED' : 'NOT_CONNECTED'}
+              {audit?.geelark.connected
+                ? audit?.geelark.rpaReady
+                  ? 'RPA_READY'
+                  : 'DEVICE_ONLY_NO_RPA'
+                : 'NOT_CONNECTED'}
             </span>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
             {audit?.geelark.statusHe || 'בודק מצב חיבור GeeLark...'}
           </p>
           <div className="text-[11px] font-mono text-slate-400 space-y-1">
-            <div>מכשירים פעילים: {audit?.geelark.devicesCount ?? 0}</div>
+            <div>מכשירים: {audit?.geelark.devicesCount ?? 0} · משימות RPA: {(battleState.geelarkRpaFlows || []).length}</div>
             {(battleState.geelarkDevices || []).slice(0, 3).map((dev) => (
               <div key={dev.id} className="text-[10px] text-emerald-300/90 truncate">
                 {dev.serialName} · {dev.id} (status={dev.status})
@@ -300,12 +389,12 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
           </div>
         </div>
 
-        {/* 2. TikTok Account Verification */}
+        {/* 2. TikTok Account & Owned Room Guard */}
         <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-emerald-400" />
-              2. חשבון TikTok מחובר
+              2. חשבון TikTok והגנת חדר
             </span>
             <span
               className={`px-2 py-0.5 rounded border text-[10px] font-mono ${
@@ -320,91 +409,199 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
           <p className="text-xs text-slate-300 leading-relaxed">
             {audit?.tiktokAccount.accessSummaryHe || 'אין חיבור חי כרגע'}
           </p>
-          <div className="text-[11px] font-mono text-slate-500 truncate">
-            OAuth:{' '}
-            {audit?.tiktokAccount.oauthUser
-              ? audit.tiktokAccount.oauthUser
-              : audit?.tiktokAccount.oauthConfigured
-                ? 'מוגדר (ממתין להתחברות)'
-                : 'לא מוגדר'}
-            {audit?.tiktokAccount.webcastRoomId ? ` · Room ${audit.tiktokAccount.webcastRoomId}` : ''}
+          <div className="text-[11px] font-mono text-slate-400 space-y-0.5 truncate">
+            <div>
+              חדר בבעלותך: {audit?.tiktokAccount.ownedRoomUsername ? `@${audit.tiktokAccount.ownedRoomUsername}` : 'לא הוגדר (TIKTOK_OWNED_ROOM_USERNAME)'}
+            </div>
+            <div className="text-slate-500 truncate">
+              OAuth: {audit?.tiktokAccount.oauthUser || (audit?.tiktokAccount.oauthConfigured ? 'מוגדר' : 'לא מוגדר')}
+            </div>
           </div>
         </div>
 
-        {/* 3. AI Providers Status */}
+        {/* 3. AI Council Models & Auth Diagnostics (Requested vs Actual, ZERO Silent Fallback) */}
         <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
               <Cpu className="w-4 h-4 text-amber-400" />
-              3. מנועי AI במסלול
+              3. מנועי מועצה (ביקורת מודלים)
             </span>
           </div>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-300">OpenAI (OPENAI_API_KEY)</span>
-              <span
-                className={`font-mono text-[11px] ${
-                  audit?.aiProviders.openaiConfigured ? 'text-emerald-300' : 'text-slate-500'
-                }`}
-              >
-                {audit?.aiProviders.openaiConfigured ? 'פעיל' : 'לא מוגדר'}
-              </span>
+          <div className="space-y-2 text-[11px]">
+            {/* OpenAI */}
+            <div className="bg-[#0B0E14] border border-[#1E2636] rounded p-2 space-y-0.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-200 font-semibold">OpenAI ({diag?.openai.requestedModel || audit?.aiProviders.openaiRequestedModel || 'gpt-6-astra'})</span>
+                <span className={`font-mono ${diag?.openai.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {diag ? (diag.openai.ok ? 'OK' : diag.openai.authOk ? 'MODEL_ERR' : 'AUTH_ERR') : audit?.aiProviders.openaiConfigured ? 'CONFIGURED' : 'MISSING'}
+                </span>
+              </div>
+              {diag?.openai && (
+                <div className="text-[10px] font-mono text-slate-400 truncate">
+                  actual={diag.openai.actualModel || 'NONE'} · auth={String(diag.openai.authOk)} · model={String(diag.openai.modelOk)}
+                </div>
+              )}
+              {diag?.openai.errorHe && <div className="text-[10px] text-rose-300 break-words">{diag.openai.errorHe}</div>}
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-300">Claude (ANTHROPIC_API_KEY)</span>
-              <span
-                className={`font-mono text-[11px] ${
-                  audit?.aiProviders.claudeConfigured ? 'text-emerald-300' : 'text-slate-500'
-                }`}
-              >
-                {audit?.aiProviders.claudeConfigured ? 'פעיל' : 'לא מוגדר'}
-              </span>
+
+            {/* Claude (Anthropic) — Separate Auth vs Model */}
+            <div className="bg-[#0B0E14] border border-[#1E2636] rounded p-2 space-y-0.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-200 font-semibold">Claude ({diag?.claude.requestedModel || audit?.aiProviders.claudeRequestedModel || 'claude-fable-5-2'})</span>
+                <span className={`font-mono ${diag?.claude.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {diag ? (diag.claude.ok ? 'OK' : diag.claude.authOk ? 'MODEL_ERR' : 'AUTH_ERR') : audit?.aiProviders.claudeConfigured ? 'CONFIGURED' : 'MISSING'}
+                </span>
+              </div>
+              {diag?.claude && (
+                <div className="text-[10px] font-mono text-slate-400 truncate">
+                  actual={diag.claude.actualModel || 'NONE'} · keyAuth={String(diag.claude.authOk)} · model={String(diag.claude.modelOk)}
+                </div>
+              )}
+              {diag?.claude.errorHe && <div className="text-[10px] text-rose-300 break-words">{diag.claude.errorHe}</div>}
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-300">Gemini Showrunner</span>
-              <span
-                className={`font-mono text-[11px] ${
-                  audit?.aiProviders.geminiConfigured ? 'text-emerald-300' : 'text-amber-300'
-                }`}
-              >
-                {audit?.aiProviders.geminiConfigured ? 'פעיל (gemini-4-hydrogen)' : 'גיבוי מקומי'}
+
+            {/* Gemini Collector/Executor */}
+            <div className="flex items-center justify-between text-[11px] px-1">
+              <span className="text-slate-300">Gemini (איסוף וביצוע בלבד)</span>
+              <span className={`font-mono ${diag ? (diag.gemini.ok ? 'text-emerald-300' : 'text-rose-300') : audit?.aiProviders.geminiConfigured ? 'text-cyan-300' : 'text-slate-500'}`}>
+                {diag ? (diag.gemini.ok ? 'gemini-4-hydrogen OK' : 'FAILED') : audit?.aiProviders.geminiConfigured ? 'EXECUTOR_ONLY' : 'MISSING'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* 4. Chat Permissions Matrix */}
-        <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2">
+        {/* 4. Safe Owned-Room GeeLark Real Chat Execution */}
+        <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
-              4. הרשאות צ׳אט בפועל
+              <MessageSquareShare className="w-4 h-4 text-rose-400" />
+              4. בדיקת צ׳אט אמת ב-GeeLark
             </span>
           </div>
-          <div className="space-y-1.5 text-[11px]">
-            {(audit?.chatCapabilities || []).map((cap) => (
-              <div key={cap.id} className="flex items-start justify-between gap-2">
-                <span className="text-slate-300 leading-tight">{cap.actionHe}</span>
-                <span
-                  className={`font-mono shrink-0 ${
-                    cap.allowedInRealTikTok
-                      ? 'text-emerald-300'
-                      : cap.supportLevel === 'LOCAL_PREVIEW_ONLY'
-                        ? 'text-amber-300'
-                        : 'text-rose-300'
-                  }`}
-                >
-                  {cap.allowedInRealTikTok
-                    ? 'מותר חי'
-                    : cap.supportLevel === 'LOCAL_PREVIEW_ONLY'
-                      ? 'דמו מקומי'
-                      : 'חסום'}
-                </span>
+          <form onSubmit={handleGeeLarkChatExecute} className="space-y-2 text-[11px]">
+            <input
+              type="text"
+              value={geelarkRoomInput}
+              onChange={(e) => setGeelarkRoomInput(e.target.value)}
+              placeholder="@owned_room (חדר שבשליטתך בלבד)"
+              className="w-full bg-[#0B0E14] border border-[#283246] rounded px-2.5 py-1.5 text-xs text-slate-100"
+            />
+            <input
+              type="text"
+              value={geelarkMsgInput}
+              onChange={(e) => setGeelarkMsgInput(e.target.value)}
+              placeholder="הודעה לבדיקה בחדר שבשליטתך..."
+              className="w-full bg-[#0B0E14] border border-[#283246] rounded px-2.5 py-1.5 text-xs text-slate-100"
+            />
+            <label className="flex items-center gap-1.5 text-[10px] text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={confirmedOwnedRoom}
+                onChange={(e) => setConfirmedOwnedRoom(e.target.checked)}
+                className="accent-amber-500"
+              />
+              <span>מאשר שחדר זה בשליטתי בלבד (לעולם לא לחדרים אחרים)</span>
+            </label>
+            <button
+              type="submit"
+              disabled={busyAction}
+              className="w-full px-3 py-1.5 rounded bg-[#1E2636] hover:bg-[#2A364F] border border-[#32405D] text-slate-100 font-semibold text-xs disabled:opacity-50"
+            >
+              שגר דרך GeeLark RPA לחדר שלי
+            </button>
+          </form>
+          {geelarkExecResultHe && (
+            <div className="text-[10px] font-mono bg-[#0B0E14] border border-[#283246] rounded p-2 text-amber-200 break-words">
+              {geelarkExecResultHe}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Pending Governance Proposals Queue (Rules & Tools Generated by Gemini as PROPOSED) */}
+      {(proposedRules.length > 0 || proposedTools.length > 0) && (
+        <section className="bg-[#121722] border border-amber-500/35 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-bold text-slate-100">
+                תור הצעות חוקים וכלים ממתינים לאישור גרסה ({proposedRules.length + proposedTools.length})
+              </h2>
+            </div>
+            <span className="text-[11px] text-slate-400">
+              תובנות Gemini נשמרות כהצעה (PROPOSED) ואינן פועלות אוטומטית עד אישור מפעיל וקבלת גרסה
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {proposedRules.map((rule) => (
+              <div
+                key={rule.id}
+                className="bg-[#0B0E14] border border-[#253047] rounded-lg p-3 flex items-start justify-between gap-3 text-xs"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 font-mono text-[10px]">
+                      PROPOSED RULE · v{rule.version || 1}
+                    </span>
+                    <span className="font-bold text-slate-100 truncate">{rule.titleHe}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">{rule.triggerConditionHe}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => approveProposal('rule', rule.id, 'APPROVE')}
+                    className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px]"
+                  >
+                    אשר גרסה
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => approveProposal('rule', rule.id, 'REJECT')}
+                    className="px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[11px]"
+                  >
+                    דחה
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {proposedTools.map((tool) => (
+              <div
+                key={tool.id}
+                className="bg-[#0B0E14] border border-[#253047] rounded-lg p-3 flex items-start justify-between gap-3 text-xs"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/40 text-sky-300 font-mono text-[10px]">
+                      PROPOSED TOOL · v{tool.version || 1}
+                    </span>
+                    <span className="font-bold text-slate-100 truncate">{tool.nameHe}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">{tool.howItWorksHe}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => approveProposal('tool', tool.id, 'APPROVE')}
+                    className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px]"
+                  >
+                    אשר כלי
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => approveProposal('tool', tool.id, 'REJECT')}
+                    className="px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[11px]"
+                  >
+                    דחה
+                  </button>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Main Split: Decision Queue (Left) + Full Pipeline Trace Inspector (Right) */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -415,7 +612,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
               תור החלטות והיסטוריה ({decisions.length})
             </h2>
             <span className="text-[11px] text-slate-400 font-mono">
-              מצב נוכחי: {approvalMode}
+              מצב שרת: {approvalMode}
             </span>
           </div>
 
@@ -428,9 +625,15 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
                   ? { text: 'ממתין לאישור', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' }
                   : status === 'APPROVED_EXECUTED'
                     ? { text: 'אושר ובוצע', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' }
-                    : status === 'REJECTED'
-                      ? { text: 'נדחה', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' }
-                      : { text: 'אוטומטי', cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40' };
+                    : status === 'COUNCIL_BLOCKED'
+                      ? { text: 'נחסם במועצה', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' }
+                      : status === 'EXECUTION_FAILED'
+                        ? { text: 'ביצוע נכשל', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' }
+                        : status === 'EXPIRED'
+                          ? { text: 'פג תוקף', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' }
+                          : status === 'REJECTED'
+                            ? { text: 'נדחה', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' }
+                            : { text: 'אושר אוטומטית', cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40' };
 
               return (
                 <div
@@ -503,7 +706,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
                     <span className="font-mono text-xs text-amber-300">{selectedDecision.id}</span>
                   </div>
                   <p className="text-xs text-slate-400">
-                    מנוע קובע: {selectedDecision.decidedBy || 'DETERMINISTIC'} · מתח{' '}
+                    סמכות החלטה: {selectedDecision.decidedBy || 'DETERMINISTIC'} · מתח{' '}
                     {selectedDecision.tensionScore}% · אנרגיה {selectedDecision.energyScore}%
                   </p>
                 </div>
@@ -531,6 +734,47 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
                   </div>
                 )}
               </div>
+
+              {/* OpenAI Plan + Claude Binding Verdict Cards */}
+              {(selectedDecision.openAiPlan || selectedDecision.claudeInspection) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className="bg-[#0B0E14] border border-[#1E2636] rounded-lg p-3 space-y-1">
+                    <div className="font-bold text-sky-300">תוכנית מובנית — OpenAI</div>
+                    {selectedDecision.openAiPlan ? (
+                      <>
+                        <div className="text-slate-200">{selectedDecision.openAiPlan.situationSummaryHe}</div>
+                        <div className="font-mono text-[10px] text-amber-300">
+                          שכבה: {selectedDecision.openAiPlan.layerPlacement} · יעד: {selectedDecision.openAiPlan.targetRoomOrScope}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-rose-300">לא הופקה תוכנית OpenAI</div>
+                    )}
+                  </div>
+
+                  <div className="bg-[#0B0E14] border border-[#1E2636] rounded-lg p-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-300">בדיקת מועצה — Claude</span>
+                      {selectedDecision.claudeInspection && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10px] border ${
+                            selectedDecision.claudeInspection.verdict === 'APPROVE'
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                              : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                          }`}
+                        >
+                          {selectedDecision.claudeInspection.verdict}
+                        </span>
+                      )}
+                    </div>
+                    {selectedDecision.claudeInspection ? (
+                      <div className="text-slate-200">{selectedDecision.claudeInspection.summaryHe}</div>
+                    ) : (
+                      <div className="text-rose-300">בדיקת Claude לא אושרה / נכשלה — התוכנית נעצרה</div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 9-Stage Pipeline Trace */}
               <div className="space-y-2.5">
@@ -580,7 +824,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
               {(!selectedDecision.pipelineTrace || selectedDecision.pipelineTrace.length === 0) && (
                 <div className="p-4 rounded-xl bg-[#0B0E14] border border-[#1E2636] text-xs text-slate-400 flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>החלטה זו נוצרה לפני הפעלת Trace מפורט — לחץ על "הפק החלטה לשער האישור" להצגת מסלול מלא.</span>
+                  <span>החלטה זו נוצרה לפני הפעלת Trace מפורט — לחץ על "הרץ מועצת החלטות לשער האישור" להצגת מסלול מלא.</span>
                 </div>
               )}
             </>

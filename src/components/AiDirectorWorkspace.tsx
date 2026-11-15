@@ -127,6 +127,17 @@ interface AiDirectorWorkspaceProps {
     availableCustomTracks?: { id: string; titleHe: string }[];
     directorPromptHe?: string;
   }) => Promise<AiDirectorDecision | null>;
+  generateAiClientVideo?: (payload: {
+    imageBase64: string;
+    mimeType?: string;
+    promptHe?: string;
+  }) => Promise<{ ok?: boolean; errorHe?: string }>;
+  clearAiClientVideo?: () => Promise<unknown>;
+  approveProposal?: (
+    kind: 'rule' | 'tool' | 'ws_binding',
+    id: string,
+    action: 'APPROVE' | 'REJECT'
+  ) => Promise<{ ok?: boolean; errorHe?: string }>;
   refreshState: () => Promise<void>;
   onPerfSample: (metrics: StagePerfMetrics) => void;
   onOpenTikTokTab: () => void;
@@ -138,6 +149,9 @@ export function AiDirectorWorkspace({
   sendTikTokEvent,
   controlBattle,
   askAiDirectorNow,
+  generateAiClientVideo,
+  clearAiClientVideo,
+  approveProposal,
   refreshState,
   onPerfSample,
   onOpenTikTokTab,
@@ -176,6 +190,14 @@ export function AiDirectorWorkspace({
   const [opponentHandleInput, setOpponentHandleInput] = useState<string>(
     battleState.cloudRadar?.opponentUsername || ''
   );
+
+  // Layer 7: AI Client Photo -> Video Generator state
+  const clientPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [clientVideoPrompt, setClientVideoPrompt] = useState<string>(
+    'אולפן לייב אנרגטי 9:16 מתוך תמונת הלקוח עם תאורה קולנועית'
+  );
+  const [generatingClientVid, setGeneratingClientVid] = useState<boolean>(false);
+  const [clientVideoErrorHe, setClientVideoErrorHe] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const latestAudioBase64Ref = useRef<{ base64: string; mimeType: string } | null>(null);
@@ -1013,30 +1035,54 @@ export function AiDirectorWorkspace({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="font-bold text-amber-300 truncate">{tool.nameHe}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-amber-300 truncate">{tool.nameHe}</span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-mono text-[9px] border ${
+                            tool.approved && tool.status === 'APPROVED'
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                              : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                          }`}
+                        >
+                          {tool.approved && tool.status === 'APPROVED'
+                            ? `APPROVED v${tool.version || 1}`
+                            : 'PROPOSED'}
+                        </span>
+                      </div>
                       <div className="text-[10px] text-slate-500 truncate">{tool.sourceLabelHe}</div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {!tool.approved && approveProposal && (
+                        <button
+                          type="button"
+                          onClick={() => approveProposal('tool', tool.id, 'APPROVE')}
+                          className="px-2 py-1 rounded bg-emerald-500 text-slate-950 font-bold text-[11px] hover:bg-emerald-400 transition-colors"
+                        >
+                          אשר כלי
+                        </button>
+                      )}
                       <button
                         type="button"
-                        disabled={executingPlaybookId === tool.id}
+                        disabled={executingPlaybookId === tool.id || !tool.approved}
+                        title={!tool.approved ? 'יש לאשר הצעה לפני הפעלה' : undefined}
                         onClick={() => handleExecutePlaybookOnStage({ toolId: tool.id })}
-                        className="px-2 py-1 rounded bg-amber-500 text-slate-950 font-bold text-[11px] hover:bg-amber-400 transition-colors"
+                        className="px-2 py-1 rounded bg-amber-500 disabled:opacity-40 text-slate-950 font-bold text-[11px] hover:bg-amber-400 transition-colors"
                       >
                         הפעל
                       </button>
                       <button
                         type="button"
+                        disabled={!tool.approved}
                         onClick={() =>
                           controlBattle({ action: 'toggle_discovered_tool', toolId: tool.id })
                         }
-                        className={`px-2 py-1 rounded text-[11px] font-semibold border ${
-                          tool.autoEnabled
+                        className={`px-2 py-1 rounded text-[11px] font-semibold border disabled:opacity-40 ${
+                          tool.autoEnabled && tool.approved
                             ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                             : 'bg-[#0B0E14] border-[#283246] text-slate-500'
                         }`}
                       >
-                        {tool.autoEnabled ? 'אוטו׳' : 'כבוי'}
+                        {tool.autoEnabled && tool.approved ? 'אוטו׳' : 'כבוי'}
                       </button>
                     </div>
                   </div>
@@ -1186,6 +1232,89 @@ export function AiDirectorWorkspace({
               onStageTap={() => sendTikTokEvent({ type: 'like', count: 5, user: 'טאפ מסך' })}
               onGestureDetected={(gesture) => sendTikTokEvent({ type: 'gesture', gesture })}
             />
+
+            {/* Layer 7: Client Photo -> AI Video Studio Control (Only overlays stage when READY) */}
+            <div className="pt-3 border-t border-[#1E2636] space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-200">
+                  שכבה 7: וידאו AI מתמונת לקוח (מוצג רק כשהסרטון READY)
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded font-mono text-[10px] border ${
+                    battleState.aiClientVideo?.status === 'READY'
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      : battleState.aiClientVideo?.status === 'GENERATING'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                        : battleState.aiClientVideo?.status === 'FAILED'
+                          ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                          : 'bg-[#0B0E14] border-[#283246] text-slate-400'
+                  }`}
+                >
+                  {battleState.aiClientVideo?.status || 'IDLE'}
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={clientVideoPrompt}
+                  onChange={(e) => setClientVideoPrompt(e.target.value)}
+                  placeholder="תיאור תנועה/אווירה לסרטון הלקוח (9:16)..."
+                  className="flex-1 bg-[#0B0E14] border border-[#283246] rounded px-2.5 py-1.5 text-[11px] text-slate-100"
+                />
+                <input
+                  ref={clientPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file || !generateAiClientVideo) return;
+                    setGeneratingClientVid(true);
+                    setClientVideoErrorHe(null);
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      try {
+                        const res = await generateAiClientVideo({
+                          imageBase64: String(reader.result || ''),
+                          mimeType: file.type || 'image/jpeg',
+                          promptHe: clientVideoPrompt,
+                        });
+                        if (!res?.ok && res?.errorHe) {
+                          setClientVideoErrorHe(res.errorHe);
+                        }
+                      } finally {
+                        setGeneratingClientVid(false);
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={generatingClientVid || !generateAiClientVideo}
+                  onClick={() => clientPhotoInputRef.current?.click()}
+                  className="px-2.5 py-1.5 rounded bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-500/40 text-fuchsia-200 text-[11px] font-semibold shrink-0 disabled:opacity-50"
+                >
+                  {generatingClientVid ? 'מייצר וידאו...' : 'העלה תמונת לקוח'}
+                </button>
+                {battleState.aiClientVideo?.status === 'READY' && clearAiClientVideo && (
+                  <button
+                    type="button"
+                    onClick={() => clearAiClientVideo()}
+                    className="px-2 py-1.5 rounded bg-[#0B0E14] border border-[#283246] text-slate-300 text-[11px]"
+                  >
+                    הסר
+                  </button>
+                )}
+              </div>
+              {(clientVideoErrorHe || battleState.aiClientVideo?.errorHe) && (
+                <div className="text-[11px] text-rose-300">
+                  {clientVideoErrorHe || battleState.aiClientVideo?.errorHe}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* OPPONENT ANTI-CLOUD SCORE X-RAY + SUPPORTER AVATARS STAGE DECK */}
@@ -1628,10 +1757,10 @@ export function AiDirectorWorkspace({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold font-display text-slate-100">
-                  מוח הבמאי וזיכרון הפעולה (Gemini Showrunner)
+                  מוח הבמאי ומועצת ההחלטות (OpenAI + Claude | Gemini איסוף וביצוע)
                 </h2>
                 <p className="text-xs text-slate-400">
-                  מתאם מצלמה + גירוי אצבע + מוזיקה + VFX + המצאת כלים חדשים בזמן אמת בהתאם למדינה ({calib?.code})
+                  OpenAI + Claude מחליטים על אפקטים, שכבות, יעד ותזמון · Gemini אוסף ומבצע תוכנית מאושרת בלבד ({calib?.code})
                 </p>
               </div>
               <div className="flex items-center gap-2">

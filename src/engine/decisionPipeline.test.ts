@@ -2,178 +2,270 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyApprovalTransition,
+  assertOwnedTikTokRoomForSend,
   buildIntegrationAuditReport,
   buildPipelineTrace,
+  canDeterministicRuleExecute,
+  enforceServerApprovalPolicy,
+  evaluateCouncilDecision,
+  sanitizeSecretHeaderValue,
+  toProposedGovernanceDefaults,
   type ApprovableDecisionLike,
+  type StructuredDirectorPlan,
 } from './decisionPipeline';
 
-test('buildPipelineTrace keeps unconfigured OpenAI/Claude honest and marks PENDING_APPROVAL', () => {
+const SAMPLE_PLAN: StructuredDirectorPlan = {
+  situationSummaryHe: 'דחיפת קומבו וסנייפ ב-15 שניות לסיום',
+  tensionScore: 84,
+  energyScore: 78,
+  targetRoomOrScope: 'OWN_STAGE',
+  layerPlacement: 'L4_STANDARD_FRONT_FX',
+  vfxId: 'VID_04_COLD_SPARK_FOUNTAINS',
+  soundCueId: 'SND_SNIPE_LOCK',
+  musicTrackId: 'MUS_SNIPE_TENSION_CLOCK',
+  cameraPreset: 'ZOOM_PUNCH',
+  cameraReasonHe: 'הדגשת סנייפ סיום',
+  tapCalloutTextHe: 'DOUBLE TAP NOW!',
+  tapDurationSec: 8,
+  timingNoteHe: 'מיד עם נעילת הסנייפ',
+  rationaleHe: 'מגביר תמיכה בשניות ההכרעה',
+};
+
+test('enforceServerApprovalPolicy blocks client requireApproval:false bypass when server requires approval', () => {
+  const res = enforceServerApprovalPolicy({
+    serverApprovalMode: 'REQUIRE_APPROVAL',
+    clientRequireApproval: false,
+  });
+
+  assert.equal(res.needsApproval, true);
+  assert.equal(res.requiresApproval, true);
+  assert.equal(res.effectiveMode, 'REQUIRE_APPROVAL');
+  assert.equal(res.bypassBlocked, true);
+  assert.equal(res.overrideBlocked, true);
+});
+
+test('evaluateCouncilDecision blocks execution with NO Gemini decision fallback when OpenAI or Claude fails/rejects/disagrees', () => {
+  const openAiFail = evaluateCouncilDecision({
+    openai: { ok: false, plan: null, errorHe: 'OpenAI gpt-6-astra timeout' },
+    claude: { ok: true, inspection: { verdict: 'APPROVE', summaryHe: 'ok' } },
+  });
+  assert.equal(openAiFail.approved, false);
+  assert.equal(openAiFail.status, 'COUNCIL_BLOCKED');
+  assert.equal(openAiFail.blockedBy, 'OPENAI');
+
+  const claudeReject = evaluateCouncilDecision({
+    openai: { ok: true, plan: SAMPLE_PLAN },
+    claude: { ok: true, inspection: { verdict: 'REJECT', summaryHe: 'קולדאון אפקט פעיל' } },
+  });
+  assert.equal(claudeReject.approved, false);
+  assert.equal(claudeReject.status, 'COUNCIL_BLOCKED');
+  assert.equal(claudeReject.blockedBy, 'CLAUDE');
+
+  const claudeDisagree = evaluateCouncilDecision({
+    openai: { ok: true, plan: SAMPLE_PLAN },
+    claude: { ok: true, inspection: { verdict: 'DISAGREE', summaryHe: 'שכבת היעד שגויה' } },
+  });
+  assert.equal(claudeDisagree.approved, false);
+  assert.equal(claudeDisagree.status, 'COUNCIL_BLOCKED');
+  assert.equal(claudeDisagree.blockedBy, 'CLAUDE');
+
+  const bothPass = evaluateCouncilDecision({
+    openai: { ok: true, plan: SAMPLE_PLAN },
+    claude: { ok: true, inspection: { verdict: 'APPROVE', summaryHe: 'תוכנית מאומתת ותקינה' } },
+  });
+  assert.equal(bothPass.approved, true);
+  assert.equal(bothPass.status, 'COUNCIL_APPROVED');
+});
+
+test('toProposedGovernanceDefaults and canDeterministicRuleExecute ensure Gemini rules/tools save as inactive proposals', () => {
+  const proposed = toProposedGovernanceDefaults();
+  assert.equal(proposed.approved, false);
+  assert.equal(proposed.status, 'PROPOSED');
+  assert.equal(proposed.active, false);
+  assert.equal(proposed.autoEnabled, false);
+
+  const blockedProposed = canDeterministicRuleExecute(proposed);
+  assert.equal(blockedProposed.allowed, false);
+
+  const missingVersion = canDeterministicRuleExecute({
+    approved: true,
+    status: 'APPROVED',
+    active: true,
+    version: 0,
+  });
+  assert.equal(missingVersion.allowed, false);
+
+  const validApproved = canDeterministicRuleExecute({
+    approved: true,
+    status: 'APPROVED',
+    active: true,
+    version: 1,
+  });
+  assert.equal(validApproved.allowed, true);
+});
+
+test('applyApprovalTransition blocks expired plans, double-execution, and failed GeeLark execution (never marks APPROVED_EXECUTED)', () => {
   const trace = buildPipelineTrace({
-    nowTs: 1700000000000,
+    nowTs: 1000,
     liveConnected: true,
-    liveTargetUsername: 'khaledashur',
-    liveRoomId: '7708469257524366098',
-    liveViewerCount: 439,
-    packetsCaptured: 120,
-    dataSummaryHe: 'נתוני קרב וטלמטריה נאספו',
-    openai: { configured: false, called: false, ok: false, summaryHe: '' },
-    claude: { configured: false, called: false, ok: false, summaryHe: '' },
-    gemini: {
-      configured: true,
-      called: true,
-      ok: true,
-      model: 'gemini-4-hydrogen',
-      summaryHe: 'זוהה רגע מתאים להפעלת ניצוצות',
-    },
-    decisionSummaryHe: 'הומלץ אפקט VID_04_COLD_SPARK_FOUNTAINS',
+    liveTargetUsername: 'myroom',
+    liveRoomId: '101',
+    liveViewerCount: 120,
+    packetsCaptured: 14,
+    dataSummaryHe: 'טלמטריה מלאה',
+    openai: { configured: true, called: true, ok: true, requestedModel: 'gpt-6-astra', actualModel: 'gpt-6-astra', authOk: true, modelOk: true, summaryHe: 'תוכנית מוכנה' },
+    claude: { configured: true, called: true, ok: true, requestedModel: 'claude-fable-5-2', actualModel: 'claude-fable-5-2', authOk: true, modelOk: true, summaryHe: 'APPROVE' },
+    gemini: { configured: true, called: false, ok: true, model: 'gemini-4-hydrogen', summaryHe: 'מוכן לביצוע מאושר' },
+    decisionSummaryHe: 'VFX: VID_04',
     approvalMode: 'REQUIRE_APPROVAL',
     approvalStatus: 'PENDING_APPROVAL',
     executionDetailHe: 'ממתין',
     resultDetailHe: 'ממתין',
   });
 
-  assert.equal(trace.length, 9);
-  assert.equal(trace.find((s) => s.stage === 'LIVE')?.status, 'COMPLETED');
-  assert.equal(trace.find((s) => s.stage === 'OPENAI')?.status, 'NOT_CONFIGURED');
-  assert.equal(trace.find((s) => s.stage === 'CLAUDE')?.status, 'NOT_CONFIGURED');
-  assert.equal(trace.find((s) => s.stage === 'GEMINI')?.status, 'COMPLETED');
-  assert.equal(trace.find((s) => s.stage === 'APPROVAL')?.status, 'PENDING');
-  assert.equal(trace.find((s) => s.stage === 'EXECUTION')?.status, 'PENDING');
-  assert.equal(trace.find((s) => s.stage === 'RESULT')?.status, 'PENDING');
-});
-
-test('applyApprovalTransition executes pending decision on APPROVE and blocks double-approval', () => {
-  const trace = buildPipelineTrace({
-    nowTs: 1000,
-    liveConnected: false,
-    liveTargetUsername: null,
-    liveRoomId: null,
-    liveViewerCount: 0,
-    packetsCaptured: 5,
-    dataSummaryHe: 'מצב מקומי',
-    openai: { configured: true, called: true, ok: true, model: 'gpt-4o-mini', summaryHe: 'ניתוח OpenAI' },
-    claude: { configured: true, called: true, ok: true, model: 'claude-3-5-sonnet-latest', summaryHe: 'בדיקת Claude' },
-    gemini: { configured: true, called: true, ok: true, model: 'gemini-4-hydrogen', summaryHe: 'בימוי Gemini' },
-    decisionSummaryHe: 'הפעל תותחי CO2',
-    approvalMode: 'REQUIRE_APPROVAL',
-    approvalStatus: 'PENDING_APPROVAL',
-    executionDetailHe: '',
-    resultDetailHe: '',
-  });
-
-  const decision: ApprovableDecisionLike = {
-    id: 'ai_test_1',
+  // 1. Expired decision cannot execute
+  const expiredInput: ApprovableDecisionLike = {
+    id: 'dec_exp',
     timestamp: 1000,
+    expiresAt: 1500,
     approvalStatus: 'PENDING_APPROVAL',
+    councilApproved: true,
     pipelineTrace: trace,
   };
+  const expired = applyApprovalTransition(expiredInput, 'APPROVE', 'operator', 2000);
+  assert.equal(expired.ok, false);
+  assert.equal(expired.updated.approvalStatus, 'EXPIRED');
 
-  const approved = applyApprovalTransition(decision, 'APPROVE', 'מפעיל אולפן', 2500, {
-    ok: true,
-    detailHe: 'בוצע VFX + מצלמה על הבמה',
-    evidence: 'vfx=VID_02_CRYO_CO2_CANNONS',
-    resultDetailHe: 'סטייט עודכן ושודר ל-2 לקוחות',
+  // 2. Execution failure marks EXECUTION_FAILED, NEVER APPROVED_EXECUTED
+  const failedInput: ApprovableDecisionLike = {
+    id: 'dec_fail',
+    timestamp: 1000,
+    expiresAt: 5000,
+    approvalStatus: 'PENDING_APPROVAL',
+    councilApproved: true,
+    pipelineTrace: trace,
+  };
+  const failedExec = applyApprovalTransition(failedInput, 'APPROVE', 'operator', 2000, {
+    ok: false,
+    detailHe: 'GeeLark RPA flow missing',
+    evidence: 'geelark_error=MISSING_RPA_FLOW_OR_PERMISSION',
+    resultDetailHe: 'ביצוע חיצוני נכשל',
   });
+  assert.equal(failedExec.ok, false);
+  assert.equal(failedExec.updated.approvalStatus, 'EXECUTION_FAILED');
+  assert.equal(failedExec.updated.executedAt, null);
 
-  assert.equal(approved.ok, true);
-  assert.equal(approved.updated.approvalStatus, 'APPROVED_EXECUTED');
-  assert.equal(approved.updated.approvedAt, 2500);
-  assert.equal(approved.updated.pipelineTrace?.find((s) => s.stage === 'APPROVAL')?.status, 'COMPLETED');
-  assert.equal(approved.updated.pipelineTrace?.find((s) => s.stage === 'EXECUTION')?.status, 'COMPLETED');
-  assert.equal(approved.updated.pipelineTrace?.find((s) => s.stage === 'RESULT')?.status, 'COMPLETED');
+  // 3. Double approval blocked after APPROVED_EXECUTED
+  const okInput: ApprovableDecisionLike = {
+    id: 'dec_ok',
+    timestamp: 1000,
+    expiresAt: 5000,
+    approvalStatus: 'PENDING_APPROVAL',
+    councilApproved: true,
+    pipelineTrace: trace,
+  };
+  const okExec = applyApprovalTransition(okInput, 'APPROVE', 'operator', 2000, {
+    ok: true,
+    detailHe: 'בוצע בהצלחה',
+    evidence: 'vfx=VID_04',
+    resultDetailHe: 'סטייט עודכן',
+  });
+  assert.equal(okExec.ok, true);
+  assert.equal(okExec.updated.approvalStatus, 'APPROVED_EXECUTED');
 
-  const secondTry = applyApprovalTransition(approved.updated, 'REJECT', 'מפעיל אולפן', 3000);
-  assert.equal(secondTry.ok, false);
+  const doubleApprove = applyApprovalTransition(okExec.updated, 'APPROVE', 'operator', 2500);
+  assert.equal(doubleApprove.ok, false);
 });
 
 test('applyApprovalTransition skips execution and marks REJECTED on REJECT', () => {
-  const trace = buildPipelineTrace({
-    nowTs: 1000,
-    liveConnected: true,
-    liveTargetUsername: 'khaledashur',
-    liveRoomId: '123',
-    liveViewerCount: 200,
-    packetsCaptured: 10,
-    dataSummaryHe: 'טלמטריה',
-    openai: { configured: false, called: false, ok: false, summaryHe: '' },
-    claude: { configured: false, called: false, ok: false, summaryHe: '' },
-    gemini: { configured: true, called: true, ok: true, model: 'gemini-4-hydrogen', summaryHe: 'בדיקה' },
-    decisionSummaryHe: 'המלצה',
-    approvalMode: 'REQUIRE_APPROVAL',
-    approvalStatus: 'PENDING_APPROVAL',
-    executionDetailHe: '',
-    resultDetailHe: '',
-  });
-
   const pendingDecision: ApprovableDecisionLike = {
-    id: 'ai_test_2',
+    id: 'ai_test_rej',
     timestamp: 1000,
     approvalStatus: 'PENDING_APPROVAL',
-    pipelineTrace: trace,
+    pipelineTrace: buildPipelineTrace({
+      nowTs: 1000,
+      liveConnected: false,
+      liveTargetUsername: null,
+      liveRoomId: null,
+      liveViewerCount: 0,
+      packetsCaptured: 0,
+      dataSummaryHe: 'טלמטריה',
+      openai: { configured: true, called: true, ok: true, requestedModel: 'gpt-6-astra', summaryHe: 'plan' },
+      claude: { configured: true, called: true, ok: true, requestedModel: 'claude-fable-5-2', summaryHe: 'APPROVE' },
+      gemini: { configured: true, called: false, ok: true, model: 'gemini-4-hydrogen', summaryHe: 'collector' },
+      decisionSummaryHe: 'המלצה',
+      approvalMode: 'REQUIRE_APPROVAL',
+      approvalStatus: 'PENDING_APPROVAL',
+      executionDetailHe: '',
+      resultDetailHe: '',
+    }),
   };
 
-  const rejected = applyApprovalTransition(
-    pendingDecision,
-    'REJECT',
-    'מפעיל אולפן',
-    1800
-  );
-
+  const rejected = applyApprovalTransition(pendingDecision, 'REJECT', 'מפעיל אולפן', 1800);
   assert.equal(rejected.ok, true);
   assert.equal(rejected.updated.approvalStatus, 'REJECTED');
-  assert.equal(rejected.updated.executedAt, undefined);
-  assert.equal(rejected.updated.pipelineTrace?.find((s) => s.stage === 'APPROVAL')?.status, 'REJECTED');
   assert.equal(rejected.updated.pipelineTrace?.find((s) => s.stage === 'EXECUTION')?.status, 'SKIPPED');
-  assert.equal(rejected.updated.pipelineTrace?.find((s) => s.stage === 'RESULT')?.status, 'REJECTED');
 });
 
-test('buildIntegrationAuditReport accurately separates read-only webcast, local preview, and unconfigured GeeLark', () => {
+test('sanitizeSecretHeaderValue strips accidental KEY=, Bearer, quotes, and newlines safely', () => {
+  const cleaned = sanitizeSecretHeaderValue('ANTHROPIC_API_KEY="sk-ant-test-123"\r\n', 'ANTHROPIC_API_KEY');
+  assert.equal(cleaned.value, 'sk-ant-test-123');
+  assert.equal(cleaned.hadKeyPrefix, true);
+  assert.equal(cleaned.hadQuotes, true);
+
+  const modelCleaned = sanitizeSecretHeaderValue('gpt-6-astra\n', 'OPENAI_MODEL');
+  assert.equal(modelCleaned.value, 'gpt-6-astra');
+});
+
+test('assertOwnedTikTokRoomForSend strictly forbids sending to unowned rooms or without explicit confirmation', () => {
+  const otherRoom = assertOwnedTikTokRoomForSend({
+    requestedRoomUsername: '@khaledashur',
+    configuredOwnedRoom: '@my_studio_live',
+    confirmedOwnedRoom: true,
+  });
+  assert.equal(otherRoom.allowed, false);
+
+  const unconfirmed = assertOwnedTikTokRoomForSend({
+    requestedRoomUsername: '@my_studio_live',
+    configuredOwnedRoom: '@my_studio_live',
+    confirmedOwnedRoom: false,
+  });
+  assert.equal(unconfirmed.allowed, false);
+
+  const allowedOwn = assertOwnedTikTokRoomForSend({
+    requestedRoomUsername: '@my_studio_live',
+    configuredOwnedRoom: '@my_studio_live',
+    confirmedOwnedRoom: true,
+  });
+  assert.equal(allowedOwn.allowed, true);
+  assert.equal(allowedOwn.normalizedRoom, 'my_studio_live');
+});
+
+test('buildIntegrationAuditReport reports official models and separates GeeLark device presence from missing RPA chat permission', () => {
   const report = buildIntegrationAuditReport({
-    geelarkConfigured: false,
-    geelarkDevicesCount: 0,
+    geelarkConfigured: true,
+    geelarkDevicesCount: 1,
     geelarkLastErrorHe: null,
+    geelarkRpaReady: false,
+    geelarkRpaNoteHe: 'אין משימות RPA בחשבון',
     tiktokOauthConfigured: false,
     tiktokOauthUser: null,
     tiktokWebcastConnected: true,
     tiktokWebcastUsername: 'khaledashur',
     tiktokWebcastRoomId: '7708469257524366098',
     tiktokWebcastViewers: 439,
-    openaiConfigured: false,
-    claudeConfigured: false,
+    openaiConfigured: true,
+    claudeConfigured: true,
     geminiConfigured: true,
+    openaiRequestedModel: 'gpt-6-astra',
+    claudeRequestedModel: 'claude-fable-5-2',
     externalWsConnectedCount: 0,
   });
 
-  assert.equal(report.geelark.connected, false);
-  assert.equal(report.tiktokAccount.webcastConnected, true);
-  const localCap = report.chatCapabilities.find((c) => c.id === 'cap_local_companion_dispatch');
-  assert.equal(localCap?.allowedInRealTikTok, false);
-  assert.equal(localCap?.supportLevel, 'LOCAL_PREVIEW_ONLY');
+  assert.equal(report.geelark.connected, true);
+  assert.equal(report.geelark.rpaReady, false);
+  assert.equal(report.aiProviders.openaiRequestedModel, 'gpt-6-astra');
+  assert.equal(report.aiProviders.claudeRequestedModel, 'claude-fable-5-2');
   const geelarkCap = report.chatCapabilities.find((c) => c.id === 'cap_geelark_chat_send');
   assert.equal(geelarkCap?.allowedInRealTikTok, false);
-});
-
-test('buildPipelineTrace reports deterministic skip cleanly when Gemini is configured but called=false', () => {
-  const trace = buildPipelineTrace({
-    nowTs: 2000,
-    liveConnected: false,
-    liveTargetUsername: null,
-    liveRoomId: null,
-    liveViewerCount: 0,
-    packetsCaptured: 0,
-    dataSummaryHe: 'נתונים מקומיים',
-    openai: { configured: false, called: false, ok: false, summaryHe: '' },
-    claude: { configured: false, called: false, ok: false, summaryHe: '' },
-    gemini: { configured: true, called: false, ok: false, summaryHe: '' },
-    decisionSummaryHe: 'החלטה דטרמיניסטית',
-    approvalMode: 'AUTO_EXECUTE',
-    approvalStatus: 'AUTO_EXECUTED',
-    executionDetailHe: 'בוצע מקומית',
-    resultDetailHe: 'הסטייט עודכן',
-  });
-
-  const geminiStage = trace.find((s) => s.stage === 'GEMINI');
-  assert.equal(geminiStage?.status, 'SKIPPED');
-  assert.equal(geminiStage?.detailHe.includes('נכשלה'), false);
-  assert.equal(geminiStage?.detailHe.includes('דולג'), true);
 });

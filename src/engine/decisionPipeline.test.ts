@@ -11,6 +11,7 @@ import {
   sanitizeSecretHeaderValue,
   toProposedGovernanceDefaults,
   type ApprovableDecisionLike,
+  type PipelineStageLog,
   type StructuredDirectorPlan,
 } from './decisionPipeline';
 
@@ -268,4 +269,108 @@ test('buildIntegrationAuditReport reports official models and separates GeeLark 
   assert.equal(report.aiProviders.claudeRequestedModel, 'claude-fable-5-2');
   const geelarkCap = report.chatCapabilities.find((c) => c.id === 'cap_geelark_chat_send');
   assert.equal(geelarkCap?.allowedInRealTikTok, false);
+});
+
+test('full end-to-end Council pipeline flow: Source Data -> OpenAI Plan -> Claude Inspection -> Server Approval Gate -> Execution -> Verified Result', () => {
+  // 1. Server approval policy enforces REQUIRE_APPROVAL even when client sends requireApproval: false
+  const policy = enforceServerApprovalPolicy({
+    serverApprovalMode: 'REQUIRE_APPROVAL',
+    clientRequireApproval: false,
+  });
+  assert.equal(policy.needsApproval, true);
+  assert.equal(policy.bypassBlocked, true);
+
+  // 2. OpenAI (gpt-6-astra) produces structured plan + Claude (claude-fable-5-2) inspects & approves
+  const council = evaluateCouncilDecision({
+    openai: { ok: true, plan: SAMPLE_PLAN },
+    claude: {
+      ok: true,
+      inspection: {
+        verdict: 'APPROVE',
+        summaryHe: 'אושר — שכבה קדמית L4 ויעד OWN_STAGE בטוחים לביצוע',
+        concernsHe: [],
+      },
+    },
+  });
+  assert.equal(council.approved, true);
+  assert.equal(council.status, 'COUNCIL_APPROVED');
+
+  // 3. Decision enters PENDING_APPROVAL with all stages recorded truthfully
+  const initialTrace = buildPipelineTrace({
+    nowTs: 10_000,
+    liveConnected: true,
+    liveTargetUsername: 'my_studio_live',
+    liveRoomId: '99887766',
+    liveViewerCount: 310,
+    packetsCaptured: 48,
+    dataSummaryHe: 'מצב BATTLE · שלב TENSION · ניקוד 1420:1380',
+    openai: {
+      configured: true,
+      called: true,
+      ok: true,
+      requestedModel: 'gpt-6-astra',
+      actualModel: 'gpt-6-astra',
+      authOk: true,
+      modelOk: true,
+      summaryHe: `${SAMPLE_PLAN.situationSummaryHe} [${SAMPLE_PLAN.layerPlacement}]`,
+    },
+    claude: {
+      configured: true,
+      called: true,
+      ok: true,
+      requestedModel: 'claude-fable-5-2',
+      actualModel: 'claude-fable-5-2',
+      authOk: true,
+      modelOk: true,
+      summaryHe: '[APPROVE] אושר — שכבה קדמית L4 ויעד OWN_STAGE בטוחים לביצוע',
+    },
+    gemini: {
+      configured: true,
+      called: true,
+      ok: true,
+      model: 'gemini-4-hydrogen',
+      role: 'collector_executor_only',
+      summaryHe: 'נאספה טלמטריית שמע וקהל עבור מועצת ההחלטות',
+    },
+    decisionSummaryHe: 'VFX: VID_04_COLD_SPARK_FOUNTAINS · L4_STANDARD_FRONT_FX',
+    approvalMode: policy.effectiveMode,
+    approvalStatus: 'PENDING_APPROVAL',
+    executionDetailHe: 'ממתין לאישור מפעיל בשער השרת',
+    resultDetailHe: 'טרם בוצע עד לאישור',
+  });
+
+  const pendingDecision: ApprovableDecisionLike = {
+    id: 'dec_e2e_full',
+    timestamp: 10_000,
+    expiresAt: 130_000,
+    approvalStatus: 'PENDING_APPROVAL',
+    councilApproved: true,
+    pipelineTrace: initialTrace,
+  };
+
+  const stageById = (trace: PipelineStageLog[] | undefined, stageName: string) =>
+    (trace || []).find((s) => s.stage === stageName);
+
+  assert.equal(stageById(initialTrace, 'LIVE')?.status, 'COMPLETED');
+  assert.equal(stageById(initialTrace, 'DATA')?.status, 'COMPLETED');
+  assert.equal(stageById(initialTrace, 'OPENAI')?.status, 'COMPLETED');
+  assert.equal(stageById(initialTrace, 'CLAUDE')?.status, 'COMPLETED');
+  assert.equal(stageById(initialTrace, 'DECISION')?.status, 'COMPLETED');
+  assert.equal(stageById(initialTrace, 'APPROVAL')?.status, 'PENDING');
+  assert.equal(stageById(initialTrace, 'EXECUTION')?.status, 'PENDING');
+
+  // 4. Operator approves -> Executor executes approved plan -> Verified Result
+  const executed = applyApprovalTransition(pendingDecision, 'APPROVE', 'מפעיל אולפן', 15_000, {
+    ok: true,
+    detailHe: 'בוצע: vfx=VID_04_COLD_SPARK_FOUNTAINS · sound=SND_SNIPE_LOCK · camera=ZOOM_PUNCH',
+    evidence: 'vfx=VID_04_COLD_SPARK_FOUNTAINS sound=SND_SNIPE_LOCK',
+    resultDetailHe: 'אושר ונרשם ב-battleState ושודר לכל הלקוחות המחוברים',
+  });
+
+  assert.equal(executed.ok, true);
+  assert.equal(executed.updated.approvalStatus, 'APPROVED_EXECUTED');
+  assert.equal(executed.updated.executedAt, 15_000);
+  assert.equal(stageById(executed.updated.pipelineTrace, 'APPROVAL')?.status, 'COMPLETED');
+  assert.equal(stageById(executed.updated.pipelineTrace, 'EXECUTION')?.status, 'COMPLETED');
+  assert.equal(stageById(executed.updated.pipelineTrace, 'RESULT')?.status, 'COMPLETED');
 });

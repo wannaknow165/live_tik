@@ -958,6 +958,61 @@ export interface ProviderDiagnosticsSnapshot {
   };
 }
 
+export interface GeeLarkDeviceSummary {
+  id: string;
+  serialName: string;
+  status: string;
+  envName?: string;
+  remark?: string;
+  groupName?: string;
+  tags?: string[];
+  detectedTikTokHandle?: string | null;
+}
+
+export interface GeeLarkOperatorConfig {
+  selectedDeviceId: string;
+  selectedFlowId: string;
+  ownedLiveUsername: string;
+  selectedLiveRoom: string;
+  updatedAt: number;
+}
+
+export interface GeeLarkCapabilityReport {
+  checkedAt: number;
+  targetDeviceVerified: boolean;
+  targetDeviceId: string;
+  targetDeviceName: string | null;
+  targetDeviceStatus: string | null;
+  detectedTikTokHandleOnDevice: string | null;
+  installedTikTokPackage?: string | null;
+  rpaFlowList: {
+    ok: boolean;
+    count: number;
+    detailHe: string;
+  };
+  customFlowCreationApi: {
+    supported: boolean;
+    httpStatus: number;
+    code?: number;
+    createdFlowId?: string | null;
+    detailHe: string;
+  };
+  shellAccess?: {
+    ok: boolean;
+    httpStatus: number;
+    code?: number;
+    detailHe: string;
+  };
+  adbAccess: {
+    ok: boolean;
+    httpStatus: number;
+    code?: number;
+    adbBinaryInContainer: boolean;
+    detailHe: string;
+  };
+  missingRequirementsHe: string[];
+}
+
 export interface BattleState {
   streamMode: StreamMode;
   isRunning: boolean;
@@ -993,9 +1048,11 @@ export interface BattleState {
   approvalMode?: DecisionApprovalMode;
   integrationAudit?: IntegrationAuditReport;
   providerDiagnostics?: ProviderDiagnosticsSnapshot | null;
-  geelarkDevices?: Array<{ id: string; serialName: string; status: string; envName?: string }>;
-  geelarkRpaFlows?: Array<{ id: string; title: string }>;
+  geelarkDevices?: GeeLarkDeviceSummary[];
+  geelarkRpaFlows?: Array<{ id: string; title: string; desc?: string; params?: string[] }>;
   geelarkRpaReady?: boolean;
+  geelarkConfig?: GeeLarkOperatorConfig;
+  geelarkCapabilityReport?: GeeLarkCapabilityReport | null;
   aiClientVideo?: AiClientVideoState;
   recentChatMessages: { user: string; text: string; ts: number; source?: string; avatarUrl?: string }[];
   aiDecisions: AiDirectorDecision[];

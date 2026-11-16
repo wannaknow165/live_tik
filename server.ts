@@ -39,6 +39,7 @@ const MEMORY_FILE = path.join(DATA_DIR, 'boostera_ai_memory.json');
 const TIKLEAP_CACHE_FILE = path.join(DATA_DIR, 'tikleap_rankings_cache.json');
 const WS_SNIFFER_FILE = path.join(DATA_DIR, 'ws_event_sniffer.json');
 const CHAT_COMPANION_FILE = path.join(DATA_DIR, 'chat_companion_crew.json');
+const GEELARK_PREFS_FILE = path.join(DATA_DIR, 'geelark_operator_prefs.json');
 
 type VfxLayer = 'BACK' | 'FRONT' | 'HYBRID';
 type BattlePhaseId = 'IGNITION' | 'MOMENTUM' | 'PRESSURE' | 'TENSION' | 'FINALE';
@@ -1151,9 +1152,45 @@ interface ServerBattleState {
     gemini: Record<string, unknown>;
     geelark: Record<string, unknown>;
   } | null;
-  geelarkDevices?: Array<{ id: string; serialName: string; status: string; envName?: string }>;
-  geelarkRpaFlows?: Array<{ id: string; title: string }>;
+  geelarkDevices?: Array<{
+    id: string;
+    serialName: string;
+    status: string;
+    envName?: string;
+    remark?: string;
+    groupName?: string;
+    tags?: string[];
+    detectedTikTokHandle?: string | null;
+  }>;
+  geelarkRpaFlows?: Array<{ id: string; title: string; desc?: string; params?: string[] }>;
   geelarkRpaReady?: boolean;
+  geelarkConfig?: {
+    selectedDeviceId: string;
+    selectedFlowId: string;
+    ownedLiveUsername: string;
+    selectedLiveRoom: string;
+    updatedAt: number;
+  };
+  geelarkCapabilityReport?: {
+    checkedAt: number;
+    targetDeviceVerified: boolean;
+    targetDeviceId: string;
+    targetDeviceName: string | null;
+    targetDeviceStatus: string | null;
+    detectedTikTokHandleOnDevice: string | null;
+    installedTikTokPackage?: string | null;
+    rpaFlowList: { ok: boolean; count: number; detailHe: string };
+    customFlowCreationApi: {
+      supported: boolean;
+      httpStatus: number;
+      code?: number;
+      createdFlowId?: string | null;
+      detailHe: string;
+    };
+    shellAccess?: { ok: boolean; httpStatus: number; code?: number; detailHe: string };
+    adbAccess: { ok: boolean; httpStatus: number; code?: number; adbBinaryInContainer: boolean; detailHe: string };
+    missingRequirementsHe: string[];
+  } | null;
   aiClientVideo?: {
     status: 'IDLE' | 'GENERATING' | 'READY' | 'FAILED';
     sourceImageUrl?: string | null;
@@ -1986,6 +2023,14 @@ const battleState: ServerBattleState = {
   geelarkDevices: [],
   geelarkRpaFlows: [],
   geelarkRpaReady: false,
+  geelarkConfig: {
+    selectedDeviceId: sanitizeSecretHeaderValue(process.env.GEELARK_ENV_ID, 'GEELARK_ENV_ID').value || '646174035834568877',
+    selectedFlowId: sanitizeSecretHeaderValue(process.env.GEELARK_CHAT_FLOW_ID, 'GEELARK_CHAT_FLOW_ID').value || '',
+    ownedLiveUsername: (sanitizeSecretHeaderValue(process.env.TIKTOK_OWNED_ROOM_USERNAME, 'TIKTOK_OWNED_ROOM_USERNAME').value || '').replace(/^@/, '').trim(),
+    selectedLiveRoom: '',
+    updatedAt: Date.now(),
+  },
+  geelarkCapabilityReport: null,
   aiClientVideo: { status: 'IDLE', updatedAt: Date.now() },
   providerDiagnostics: null,
   recentChatMessages: [
@@ -2335,21 +2380,89 @@ function isGeeLarkConfigured(): boolean {
   return Boolean(readEnvClean('GEELARK_API_KEY').value && readEnvClean('GEELARK_APP_ID').value);
 }
 
+function loadPersistedGeeLarkConfig() {
+  const fallback = {
+    selectedDeviceId: readEnvClean('GEELARK_ENV_ID').value || '646174035834568877',
+    selectedFlowId: readEnvClean('GEELARK_CHAT_FLOW_ID').value || '',
+    ownedLiveUsername: (readEnvClean('TIKTOK_OWNED_ROOM_USERNAME').value || '').replace(/^@/, '').trim(),
+    selectedLiveRoom: '',
+    updatedAt: Date.now(),
+  };
+  try {
+    ensureDataDir();
+    if (fs.existsSync(GEELARK_PREFS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(GEELARK_PREFS_FILE, 'utf-8'));
+      return {
+        selectedDeviceId: String(parsed.selectedDeviceId || fallback.selectedDeviceId).trim(),
+        selectedFlowId: String(parsed.selectedFlowId ?? fallback.selectedFlowId).trim(),
+        ownedLiveUsername: String(parsed.ownedLiveUsername ?? fallback.ownedLiveUsername)
+          .replace(/^@/, '')
+          .trim(),
+        selectedLiveRoom: String(parsed.selectedLiveRoom ?? '').replace(/^@/, '').trim(),
+        updatedAt: Number(parsed.updatedAt || Date.now()),
+      };
+    }
+  } catch {
+    // Ignore read errors
+  }
+  return fallback;
+}
+
+function savePersistedGeeLarkConfig(cfg: NonNullable<ServerBattleState['geelarkConfig']>) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(GEELARK_PREFS_FILE, JSON.stringify(cfg, null, 2), 'utf-8');
+  } catch {
+    // Ignore write errors
+  }
+}
+
+battleState.geelarkConfig = loadPersistedGeeLarkConfig();
+
+function getConfiguredOwnedRoomCsv(): string | null {
+  const envOwned = (readEnvClean('TIKTOK_OWNED_ROOM_USERNAME').value || '').trim();
+  const savedOwned = (battleState.geelarkConfig?.ownedLiveUsername || '').replace(/^@/, '').trim();
+  const combined = [envOwned, savedOwned].filter(Boolean).join(',');
+  return combined || null;
+}
+
+function extractTikTokHandleHint(text: string): string | null {
+  if (!text) return null;
+  const atMatch = text.match(/@([a-zA-Z0-9._]{3,30})/);
+  if (atMatch?.[1]) return atMatch[1];
+  const tikMatch = text.match(/tiktok[:=\s]+@?([a-zA-Z0-9._]{3,30})/i);
+  if (tikMatch?.[1]) return tikMatch[1];
+  return null;
+}
+
 function computeIntegrationAudit(): IntegrationAuditReport {
   const externalConnected = battleState.wsSniffer.externalBridges.filter((b) => b.connected).length;
+  const ownedPrimary =
+    (battleState.geelarkConfig?.ownedLiveUsername || '').replace(/^@/, '').trim() ||
+    (readEnvClean('TIKTOK_OWNED_ROOM_USERNAME').value || '').split(',')[0]?.replace(/^@/, '').trim() ||
+    null;
+  const rpaFlowsCount = (battleState.geelarkRpaFlows || []).length;
   return buildIntegrationAuditReport({
     geelarkConfigured: isGeeLarkConfigured(),
     geelarkDevicesCount: (battleState.geelarkDevices || []).length,
     geelarkLastErrorHe,
+    geelarkRpaReady: Boolean(battleState.geelarkRpaReady),
+    geelarkRpaNoteHe:
+      rpaFlowsCount > 0
+        ? `נמצאו ${rpaFlowsCount} תהליכי Custom Flow זמינים ב-GeeLark לשליחת צ׳אט`
+        : 'טרם הוגדר Custom Flow בחשבון GeeLark — ניתן לבנות ולייבא תהליך אוטומטית מהממשק בלחיצה אחת דרך /open/v1/task/flow/import.',
     tiktokOauthConfigured: battleState.tiktokRoom.oauthConfigured,
     tiktokOauthUser: battleState.tiktokRoom.oauthConnectedUser?.displayName || null,
     tiktokWebcastConnected: battleState.tiktokRoom.connected,
     tiktokWebcastUsername: battleState.tiktokRoom.targetUsername,
     tiktokWebcastRoomId: battleState.tiktokRoom.roomId,
     tiktokWebcastViewers: battleState.tiktokRoom.viewerCount,
+    tiktokOwnedRoomUsername: ownedPrimary,
     openaiConfigured: Boolean(readEnvClean('OPENAI_API_KEY').value),
     claudeConfigured: Boolean(readEnvClean('ANTHROPIC_API_KEY').value),
     geminiConfigured: Boolean(readEnvClean('GEMINI_API_KEY').value),
+    openaiRequestedModel: getConfiguredOpenAiModel(),
+    claudeRequestedModel: getConfiguredAnthropicModel(),
     externalWsConnectedCount: externalConnected,
   });
 }
@@ -2439,34 +2552,228 @@ async function callGeeLarkApi<T = unknown>(
 }
 
 async function probeGeeLarkRpaFlows(): Promise<{
-  flows: Array<{ id: string; title: string; desc?: string }>;
+  ok: boolean;
+  httpStatus: number;
+  code?: number;
+  flows: Array<{ id: string; title: string; desc?: string; params?: string[] }>;
   errorHe: string | null;
 }> {
-  if (!isGeeLarkConfigured()) return { flows: [], errorHe: 'GeeLark לא מוגדר' };
+  if (!isGeeLarkConfigured()) return { ok: false, httpStatus: 0, flows: [], errorHe: 'GeeLark לא מוגדר' };
   const res = await callGeeLarkApi<{
-    items?: Array<{ id?: string; flowId?: string; title?: string; name?: string; desc?: string }>;
-    list?: Array<{ id?: string; flowId?: string; title?: string; name?: string; desc?: string }>;
-  }>('/open/v1/rpa/task/flowList', { page: 1, pageSize: 50 });
+    total?: number;
+    items?: Array<{ id?: string; flowId?: string; title?: string; name?: string; desc?: string; params?: string[] }>;
+    list?: Array<{ id?: string; flowId?: string; title?: string; name?: string; desc?: string; params?: string[] }>;
+  }>('/open/v1/task/flow/list', { page: 1, pageSize: 50 });
 
   if (!res.ok) {
-    return { flows: [], errorHe: res.errorHe };
+    return { ok: false, httpStatus: res.httpStatus, code: res.code, flows: [], errorHe: res.errorHe };
   }
   const rawItems = res.data?.items || res.data?.list || [];
   const flows = rawItems
     .map((f) => ({
       id: String(f.id || f.flowId || ''),
-      title: String(f.title || f.name || f.id || 'RPA Flow'),
+      title: String(f.title || f.name || f.id || 'Custom Flow'),
       desc: f.desc ? String(f.desc) : undefined,
+      params: Array.isArray(f.params) ? f.params.map((p) => String(p)) : undefined,
     }))
     .filter((f) => Boolean(f.id));
-  return { flows, errorHe: null };
+  return { ok: true, httpStatus: res.httpStatus, code: res.code, flows, errorHe: null };
 }
 
-async function probeGeeLarkDevices(): Promise<{
+function buildBoosteraTikTokLiveChatFlowGal(packageName = 'com.zhiliaoapp.musically'): string {
+  const galObject = {
+    title: 'BOOSTERA TikTok Live Chat',
+    desc: 'BOOSTERA automated TikTok LIVE approved comment sender (targetRoom + messageText)',
+    content: {
+      contentType: 'phone',
+      errorType: 'skip',
+      isDebug: false,
+      timeOut: '30',
+      params: [
+        { name: 'targetRoom', type: 'string', defaultValue: '' },
+        { name: 'messageText', type: 'string', defaultValue: '' },
+      ],
+      contents: [
+        {
+          type: 'openApp',
+          config: {
+            packgename: packageName,
+            remark: 'Open TikTok app on GeeLark cloud phone',
+            timeout: 30000,
+          },
+        },
+        {
+          type: 'waitTime',
+          config: {
+            remark: 'Wait for TikTok LIVE UI to settle',
+            timeout: 4000,
+            timeoutMax: 300000,
+            timeoutMin: 1000,
+            timeoutType: 'fixedValue',
+          },
+        },
+        {
+          type: 'click',
+          config: {
+            filters: [
+              { content: 'Add comment...', type: 'text' },
+              { content: 'Add comment', type: 'text' },
+              { content: 'הוסף תגובה...', type: 'text' },
+            ],
+            remark: 'Tap TikTok LIVE comment input bar',
+            searchTime: 4000,
+            serial: 1,
+            serialMax: 50,
+            serialMin: 1,
+            serialType: 'fixedValue',
+            variable: '',
+          },
+        },
+        {
+          type: 'waitTime',
+          config: {
+            remark: 'Wait for soft keyboard & input box',
+            timeout: 1500,
+            timeoutMax: 300000,
+            timeoutMin: 1000,
+            timeoutType: 'fixedValue',
+          },
+        },
+        {
+          type: 'input',
+          config: {
+            content: '${messageText}',
+            inputType: 'variable',
+            variable: 'messageText',
+            remark: 'Enter approved chat message text',
+          },
+        },
+        {
+          type: 'waitTime',
+          config: {
+            remark: 'Short pause before tapping Send',
+            timeout: 1000,
+            timeoutMax: 300000,
+            timeoutMin: 1000,
+            timeoutType: 'fixedValue',
+          },
+        },
+        {
+          type: 'click',
+          config: {
+            filters: [
+              { content: 'Send', type: 'text' },
+              { content: 'שלח', type: 'text' },
+            ],
+            remark: 'Tap Send button in TikTok LIVE chat',
+            searchTime: 3000,
+            serial: 1,
+            serialMax: 50,
+            serialMin: 1,
+            serialType: 'fixedValue',
+            variable: '',
+          },
+        },
+      ],
+    },
+  };
+  return JSON.stringify(galObject);
+}
+
+async function ensureOrImportTikTokLiveChatFlow(
+  existingFlowId?: string,
+  forceCreateBoostera = false
+): Promise<{
+  ok: boolean;
+  flowId: string | null;
+  createdNew: boolean;
+  httpStatus: number;
+  code?: number;
+  detailHe: string;
+}> {
+  if (!isGeeLarkConfigured()) {
+    return {
+      ok: false,
+      flowId: null,
+      createdNew: false,
+      httpStatus: 0,
+      detailHe: 'GeeLark אינו מוגדר בסביבה.',
+    };
+  }
+
+  const listProbe = await probeGeeLarkRpaFlows();
+  if (!forceCreateBoostera && listProbe.ok && listProbe.flows.length > 0) {
+    // Only reuse an existing flow if it is explicitly a BOOSTERA / TikTok chat flow or accepts messageText
+    const dedicatedChatFlow = listProbe.flows.find(
+      (f) =>
+        /boostera|tiktok.*(live|chat|comment)/i.test(`${f.title} ${f.desc || ''}`) ||
+        (Array.isArray(f.params) && f.params.some((p) => /messageText|comment/i.test(p)))
+    );
+    if (dedicatedChatFlow) {
+      const prev = battleState.geelarkConfig || loadPersistedGeeLarkConfig();
+      battleState.geelarkConfig = { ...prev, selectedFlowId: dedicatedChatFlow.id, updatedAt: Date.now() };
+      savePersistedGeeLarkConfig(battleState.geelarkConfig);
+      return {
+        ok: true,
+        flowId: dedicatedChatFlow.id,
+        createdNew: false,
+        httpStatus: listProbe.httpStatus,
+        code: listProbe.code,
+        detailHe: `נמצא Custom Flow ייעודי לשליחת צ׳אט בלייב: ${dedicatedChatFlow.title} (FLOW_ID=${dedicatedChatFlow.id}).`,
+      };
+    }
+  }
+
+  const installedPkg = battleState.geelarkCapabilityReport?.installedTikTokPackage || 'com.zhiliaoapp.musically';
+  const galPayload = buildBoosteraTikTokLiveChatFlowGal(installedPkg);
+  const importRes = await callGeeLarkApi<{ id?: string }>('/open/v1/task/flow/import', {
+    gal: galPayload,
+  });
+
+  if (importRes.ok && importRes.data?.id) {
+    const newFlowId = String(importRes.data.id).trim();
+    const prev = battleState.geelarkConfig || loadPersistedGeeLarkConfig();
+    battleState.geelarkConfig = {
+      ...prev,
+      selectedFlowId: newFlowId,
+      updatedAt: Date.now(),
+    };
+    savePersistedGeeLarkConfig(battleState.geelarkConfig);
+    await probeGeeLarkDevices(false);
+    return {
+      ok: true,
+      flowId: newFlowId,
+      createdNew: true,
+      httpStatus: importRes.httpStatus,
+      code: importRes.code,
+      detailHe: `נבנה ויובא אוטומטית Custom Flow חדש ב-GeeLark (/open/v1/task/flow/import): BOOSTERA TikTok Live Chat (FLOW_ID=${newFlowId}).`,
+    };
+  }
+
+  // Fallback to an explicitly selected existing flow if import failed due to plan/permission limits
+  const fallbackExisting =
+    (existingFlowId && listProbe.flows.find((f) => f.id === existingFlowId)) || null;
+
+  return {
+    ok: false,
+    flowId: fallbackExisting?.id || null,
+    createdNew: false,
+    httpStatus: importRes.httpStatus,
+    code: importRes.code,
+    detailHe: `בנייה וייבוא של Custom Flow דרך /open/v1/task/flow/import החזירה: ${
+      importRes.errorHe || `HTTP ${importRes.httpStatus}`
+    }`,
+  };
+}
+
+const TARGET_GEELARK_DEVICE_ID = '646174035834568877';
+
+async function probeGeeLarkDevices(autoBuildFlowIfEmpty = false): Promise<{
   configured: boolean;
   connected: boolean;
-  devices: Array<{ id: string; serialName: string; status: string; envName?: string }>;
-  flows: Array<{ id: string; title: string; desc?: string }>;
+  devices: NonNullable<ServerBattleState['geelarkDevices']>;
+  flows: Array<{ id: string; title: string; desc?: string; params?: string[] }>;
+  capabilityReport: ServerBattleState['geelarkCapabilityReport'];
   errorHe: string | null;
   endpointUsed?: string;
 }> {
@@ -2475,56 +2782,287 @@ async function probeGeeLarkDevices(): Promise<{
     battleState.geelarkDevices = [];
     battleState.geelarkRpaFlows = [];
     battleState.geelarkRpaReady = false;
+    battleState.geelarkCapabilityReport = null;
     battleState.integrationAudit = computeIntegrationAudit();
     return {
       configured: false,
       connected: false,
       devices: [],
       flows: [],
+      capabilityReport: null,
       errorHe: 'לא מוגדרים GEELARK_APP_ID ו-GEELARK_API_KEY בסביבת השרת.',
     };
   }
 
   const phoneRes = await callGeeLarkApi<{
-    items?: Array<{ id?: string; serialName?: string; status?: number | string; envName?: string }>;
-  }>('/open/v1/phone/list', { page: 1, pageSize: 20 });
+    items?: Array<{
+      id?: string;
+      serialName?: string;
+      status?: number | string;
+      envName?: string;
+      remark?: string;
+      group?: { name?: string };
+      groupName?: string;
+      tags?: Array<{ name?: string } | string>;
+    }>;
+  }>('/open/v1/phone/list', { page: 1, pageSize: 50 });
 
   if (!phoneRes.ok) {
     geelarkLastErrorHe = phoneRes.errorHe;
     battleState.geelarkDevices = [];
     battleState.geelarkRpaFlows = [];
     battleState.geelarkRpaReady = false;
+    battleState.geelarkCapabilityReport = null;
     battleState.integrationAudit = computeIntegrationAudit();
     return {
       configured: true,
       connected: false,
       devices: [],
       flows: [],
+      capabilityReport: null,
       errorHe: geelarkLastErrorHe,
       endpointUsed: phoneRes.endpointUrl,
     };
   }
 
-  const devices = (phoneRes.data?.items || []).map((d) => ({
-    id: String(d.id || ''),
-    serialName: String(d.serialName || d.id || 'cloud-phone'),
-    status: String(d.status ?? 'unknown'),
-    envName: d.envName,
-  }));
+  const devices: NonNullable<ServerBattleState['geelarkDevices']> = (phoneRes.data?.items || []).map((d) => {
+    const tags = Array.isArray(d.tags)
+      ? d.tags.map((t) => (typeof t === 'string' ? t : String(t?.name || ''))).filter(Boolean)
+      : [];
+    const remark = d.remark ? String(d.remark) : undefined;
+    const groupName = d.groupName || d.group?.name || undefined;
+    const serialName = String(d.serialName || d.id || 'cloud-phone');
+    const detectedTikTokHandle = extractTikTokHandleHint(
+      [serialName, d.envName || '', remark || '', groupName || '', ...tags].join(' ')
+    );
+    return {
+      id: String(d.id || ''),
+      serialName,
+      status: String(d.status ?? 'unknown'),
+      envName: d.envName,
+      remark,
+      groupName,
+      tags,
+      detectedTikTokHandle,
+    };
+  });
 
-  const flowProbe = await probeGeeLarkRpaFlows();
-  const configuredFlowId = readEnvClean('GEELARK_CHAT_FLOW_ID').value;
+  const targetDev =
+    devices.find((d) => d.id === TARGET_GEELARK_DEVICE_ID) ||
+    devices.find((d) => d.id === battleState.geelarkConfig?.selectedDeviceId) ||
+    devices[0] ||
+    null;
+
+  // Query GeeLark Analytics TikTok Accounts list (channel=0: TikTok) for registered TikTok account handles
+  let analyticsTikTokAccount: string | null = null;
+  const accountsProbe = await callGeeLarkApi<{
+    items?: Array<{ account?: string; channel?: number; remark?: string }>;
+  }>('/open/v1/analytics/accounts/list', { page: 1, pageSize: 20, channel: 0 }, 6000);
+  if (accountsProbe.ok && Array.isArray(accountsProbe.data?.items) && accountsProbe.data.items.length > 0) {
+    const firstAcc = String(accountsProbe.data.items[0]?.account || '')
+      .replace(/^@/, '')
+      .trim();
+    if (firstAcc) {
+      analyticsTikTokAccount = firstAcc;
+      if (targetDev && !targetDev.detectedTikTokHandle) {
+        targetDev.detectedTikTokHandle = firstAcc;
+      }
+    }
+  }
+
+  // Read-only probe of Cloud Phone Shell API to detect installed TikTok package on device 646174035834568877
+  let installedTikTokPackage: string | null = null;
+  let shellDetailHe = 'אין מכשיר פעיל לבדיקת /open/v1/shell/execute';
+  let shellOk = false;
+  let shellHttpStatus = 0;
+  let shellCode: number | undefined = undefined;
+
+  if (targetDev) {
+    const shellProbe = await callGeeLarkApi<{ status?: boolean; output?: string }>(
+      '/open/v1/shell/execute',
+      { id: targetDev.id, cmd: 'pm list packages' },
+      7000
+    );
+    shellHttpStatus = shellProbe.httpStatus;
+    shellCode = shellProbe.code;
+    if (shellProbe.ok && shellProbe.data?.status) {
+      shellOk = true;
+      const out = String(shellProbe.data.output || '');
+      if (out.includes('com.zhiliaoapp.musically')) {
+        installedTikTokPackage = 'com.zhiliaoapp.musically';
+      } else if (out.includes('com.ss.android.ugc.trill')) {
+        installedTikTokPackage = 'com.ss.android.ugc.trill';
+      }
+      shellDetailHe = installedTikTokPackage
+        ? `גישת Shell פעילה במכשיר (${installedTikTokPackage} מותקן).`
+        : 'גישת Shell פעילה במכשיר, אך חבילת TikTok לא נמצאה ברשימת החבילות.';
+    } else {
+      shellDetailHe = `פקודות Shell במכשיר (/open/v1/shell/execute): ${
+        shellProbe.errorHe || `status=${String(shellProbe.data?.status ?? false)}`
+      }`;
+    }
+  }
+
+  let flowProbe = await probeGeeLarkRpaFlows();
+  let flowImportOutcome: {
+    supported: boolean;
+    httpStatus: number;
+    code?: number;
+    createdFlowId?: string | null;
+    detailHe: string;
+  } = {
+    supported: flowProbe.ok,
+    httpStatus: flowProbe.httpStatus,
+    code: flowProbe.code,
+    createdFlowId: null,
+    detailHe:
+      flowProbe.flows.length > 0
+        ? `נמצאו ${flowProbe.flows.length} תהליכי Custom Flow פעילים דרך /open/v1/task/flow/list.`
+        : 'טרם נוצר תהליך Custom Flow בחשבון — ניתן לבנות ולייבא אוטומטית דרך /open/v1/task/flow/import.',
+  };
+
+  if (autoBuildFlowIfEmpty && flowProbe.ok && flowProbe.flows.length === 0) {
+    const galPayload = buildBoosteraTikTokLiveChatFlowGal(installedTikTokPackage || 'com.zhiliaoapp.musically');
+    const importRes = await callGeeLarkApi<{ id?: string }>('/open/v1/task/flow/import', {
+      gal: galPayload,
+    });
+    if (importRes.ok && importRes.data?.id) {
+      const createdId = String(importRes.data.id).trim();
+      flowImportOutcome = {
+        supported: true,
+        httpStatus: importRes.httpStatus,
+        code: importRes.code,
+        createdFlowId: createdId,
+        detailHe: `נבנה ויובא אוטומטית Custom Flow ב-GeeLark (FLOW_ID=${createdId}).`,
+      };
+      flowProbe = await probeGeeLarkRpaFlows();
+    } else {
+      flowImportOutcome = {
+        supported: false,
+        httpStatus: importRes.httpStatus,
+        code: importRes.code,
+        createdFlowId: null,
+        detailHe: `בניית Custom Flow דרך /open/v1/task/flow/import החזירה: ${
+          importRes.errorHe || `HTTP ${importRes.httpStatus}`
+        }`,
+      };
+    }
+  }
+
+  const configuredFlowId =
+    flowImportOutcome.createdFlowId ||
+    (battleState.geelarkConfig?.selectedFlowId || '').trim() ||
+    readEnvClean('GEELARK_CHAT_FLOW_ID').value;
+
+  // Probe whether ADB data access is enabled on the verified cloud phone
+  const adbProbe = targetDev
+    ? await callGeeLarkApi<{ items?: Array<{ id?: string; ip?: string; port?: number | string; code?: string }> }>(
+        '/open/v1/adb/getData',
+        { ids: [targetDev.id] },
+        6000
+      )
+    : { ok: false, httpStatus: 0, code: undefined, errorHe: 'אין מכשיר לבדיקת ADB' };
+  const adbBinaryExists = fs.existsSync('/usr/bin/adb') || fs.existsSync('/usr/local/bin/adb');
+  const adbDetailHe = adbProbe.ok
+    ? adbBinaryExists
+      ? 'גישת ADB פתוחה במכשיר וכלי adb זמין בשרת.'
+      : 'גישת ADB ב-GeeLark החזירה נתוני חיבור, אך בסביבת הענן הנוכחית לא מותקן כלי שורת הפקודה adb.'
+    : `גישת ADB למכשיר אינה זמינה דרך ה-API הנוכחי (${adbProbe.errorHe || `HTTP ${adbProbe.httpStatus}`}).`;
+
+  const effectiveOwnedUser =
+    (battleState.geelarkConfig?.ownedLiveUsername || '').trim() ||
+    (readEnvClean('TIKTOK_OWNED_ROOM_USERNAME').value || '').split(',')[0]?.replace(/^@/, '').trim() ||
+    targetDev?.detectedTikTokHandle ||
+    '';
+
+  // Auto-sync saved config with discovered device/flow so operator never types raw IDs
+  const prevCfg = battleState.geelarkConfig || loadPersistedGeeLarkConfig();
+  const nextSelectedDeviceId =
+    devices.some((d) => d.id === prevCfg.selectedDeviceId)
+      ? prevCfg.selectedDeviceId
+      : targetDev?.id || prevCfg.selectedDeviceId;
+  const nextSelectedFlowId =
+    flowImportOutcome.createdFlowId ||
+    (prevCfg.selectedFlowId && flowProbe.flows.some((f) => f.id === prevCfg.selectedFlowId)
+      ? prevCfg.selectedFlowId
+      : flowProbe.flows[0]?.id || configuredFlowId || '');
+  const nextOwnedUsername = prevCfg.ownedLiveUsername || targetDev?.detectedTikTokHandle || '';
+
+  if (
+    nextSelectedDeviceId !== prevCfg.selectedDeviceId ||
+    nextSelectedFlowId !== prevCfg.selectedFlowId ||
+    nextOwnedUsername !== prevCfg.ownedLiveUsername
+  ) {
+    battleState.geelarkConfig = {
+      ...prevCfg,
+      selectedDeviceId: nextSelectedDeviceId,
+      selectedFlowId: nextSelectedFlowId,
+      ownedLiveUsername: nextOwnedUsername,
+      updatedAt: Date.now(),
+    };
+    savePersistedGeeLarkConfig(battleState.geelarkConfig);
+  }
+
+  const rpaReady = Boolean(nextSelectedFlowId || flowProbe.flows.length > 0);
+  const missingRequirementsHe: string[] = [];
+  if (!rpaReady) {
+    missingRequirementsHe.push(
+      flowImportOutcome.supported === false
+        ? `חסר Custom Flow פעיל: ${flowImportOutcome.detailHe}`
+        : 'טרם יובא Custom Flow לחשבון — לחץ על "בנה והגדר Custom Flow ב-GeeLark" או שהוא ייבנה אוטומטית בעת השליחה הראשונה.'
+    );
+  }
+  if (!effectiveOwnedUser) {
+    missingRequirementsHe.push(
+      'שם משתמש ה-TikTok LIVE שבשליטתך אינו נחשף אוטומטית מהמכשיר — הזן רק את ה-@username של הלייב שבשליטתך בכרטיס 2.'
+    );
+  }
+
+  const capabilityReport: NonNullable<ServerBattleState['geelarkCapabilityReport']> = {
+    checkedAt: Date.now(),
+    targetDeviceVerified: devices.some((d) => d.id === TARGET_GEELARK_DEVICE_ID),
+    targetDeviceId: TARGET_GEELARK_DEVICE_ID,
+    targetDeviceName: devices.find((d) => d.id === TARGET_GEELARK_DEVICE_ID)?.serialName || targetDev?.serialName || null,
+    targetDeviceStatus: devices.find((d) => d.id === TARGET_GEELARK_DEVICE_ID)?.status || targetDev?.status || null,
+    detectedTikTokHandleOnDevice: targetDev?.detectedTikTokHandle || analyticsTikTokAccount || null,
+    installedTikTokPackage,
+    rpaFlowList: {
+      ok: flowProbe.ok,
+      count: flowProbe.flows.length,
+      detailHe: flowProbe.ok
+        ? `נשלפו ${flowProbe.flows.length} תהליכי Custom Flow מ-/open/v1/task/flow/list.`
+        : `שליפת /open/v1/task/flow/list נכשלה: ${flowProbe.errorHe || 'שגיאה'}`,
+    },
+    customFlowCreationApi: flowImportOutcome,
+    shellAccess: {
+      ok: shellOk,
+      httpStatus: shellHttpStatus,
+      code: shellCode,
+      detailHe: shellDetailHe,
+    },
+    adbAccess: {
+      ok: adbProbe.ok && adbBinaryExists,
+      httpStatus: adbProbe.httpStatus,
+      code: adbProbe.code,
+      adbBinaryInContainer: adbBinaryExists,
+      detailHe: adbDetailHe,
+    },
+    missingRequirementsHe,
+  };
 
   geelarkLastErrorHe = null;
   battleState.geelarkDevices = devices;
   battleState.geelarkRpaFlows = flowProbe.flows;
-  battleState.geelarkRpaReady = Boolean(configuredFlowId || flowProbe.flows.length > 0);
+  battleState.geelarkRpaReady = rpaReady;
+  battleState.geelarkCapabilityReport = capabilityReport;
   battleState.integrationAudit = computeIntegrationAudit();
+
   return {
     configured: true,
     connected: devices.length > 0,
     devices,
     flows: flowProbe.flows,
+    capabilityReport,
     errorHe: null,
     endpointUsed: phoneRes.endpointUrl,
   };
@@ -2548,9 +3086,11 @@ async function executeToGeeLark(opts: {
   device?: { id: string; serialName: string; status: string; envName?: string };
   taskId?: string | null;
   flowId?: string | null;
+  normalizedRoom?: string;
   errorHe?: string;
   detailHe?: string;
-  availableFlows?: Array<{ id: string; title: string; desc?: string }>;
+  availableFlows?: Array<{ id: string; title: string; desc?: string; params?: string[] }>;
+  capabilityReport?: ServerBattleState['geelarkCapabilityReport'];
 }> {
   const cleanMsg = String(opts.messageText || '').trim();
   if (!cleanMsg) {
@@ -2558,8 +3098,8 @@ async function executeToGeeLark(opts: {
   }
 
   const ownedRoomCheck = assertOwnedTikTokRoomForSend({
-    requestedRoomUsername: opts.targetRoomUsername,
-    configuredOwnedRoom: readEnvClean('TIKTOK_OWNED_ROOM_USERNAME').value || null,
+    requestedRoomUsername: opts.targetRoomUsername || battleState.geelarkConfig?.ownedLiveUsername || null,
+    configuredOwnedRoom: getConfiguredOwnedRoomCsv(),
     confirmedOwnedRoom: opts.confirmedOwnedRoom,
   });
   if (!ownedRoomCheck.allowed) {
@@ -2578,7 +3118,8 @@ async function executeToGeeLark(opts: {
     };
   }
 
-  const probe = await probeGeeLarkDevices();
+  // Probe devices and auto-build Custom Flow if none exists yet
+  let probe = await probeGeeLarkDevices(true);
   if (!probe.connected || probe.devices.length === 0) {
     return {
       ok: false,
@@ -2587,13 +3128,32 @@ async function executeToGeeLark(opts: {
     };
   }
 
-  const preferredId = String(opts.deviceId || readEnvClean('GEELARK_ENV_ID').value || '').trim();
+  const preferredId = String(
+    opts.deviceId ||
+      battleState.geelarkConfig?.selectedDeviceId ||
+      readEnvClean('GEELARK_ENV_ID').value ||
+      TARGET_GEELARK_DEVICE_ID
+  ).trim();
   const targetDevice = probe.devices.find((d) => d.id === preferredId) || probe.devices[0];
-  const configuredFlowId = String(opts.flowId || readEnvClean('GEELARK_CHAT_FLOW_ID').value || '').trim();
+  let configuredFlowId = String(
+    opts.flowId ||
+      battleState.geelarkConfig?.selectedFlowId ||
+      readEnvClean('GEELARK_CHAT_FLOW_ID').value ||
+      ''
+  ).trim();
+
+  if (!configuredFlowId && probe.flows.length === 0) {
+    const ensured = await ensureOrImportTikTokLiveChatFlow();
+    if (ensured.ok && ensured.flowId) {
+      configuredFlowId = ensured.flowId;
+      probe = await probeGeeLarkDevices(false);
+    }
+  }
+
   const matchedFlow =
     (configuredFlowId
-      ? probe.flows.find((f) => f.id === configuredFlowId) || { id: configuredFlowId, title: 'GEELARK_CHAT_FLOW_ID' }
-      : probe.flows.find((f) => /tiktok|chat|comment|live|msg/i.test(`${f.title} ${f.desc || ''}`)) ||
+      ? probe.flows.find((f) => f.id === configuredFlowId) || { id: configuredFlowId, title: 'BOOSTERA TikTok Live Chat' }
+      : probe.flows.find((f) => /boostera|tiktok|chat|comment|live|msg/i.test(`${f.title} ${f.desc || ''}`)) ||
         probe.flows[0]) || null;
 
   if (!matchedFlow) {
@@ -2601,26 +3161,43 @@ async function executeToGeeLark(opts: {
       ok: false,
       status: 'MISSING_RPA_FLOW_OR_PERMISSION',
       device: targetDevice,
+      normalizedRoom: ownedRoomCheck.normalizedRoom,
       availableFlows: probe.flows,
-      errorHe: `מכשיר GeeLark (${targetDevice.serialName}) מחובר, אך חסרה משימת RPA לשליחת צ׳אט בטיקטוק (flowList ריק ו-GEELARK_CHAT_FLOW_ID לא מוגדר). לא בוצעה שליחה חיצונית.`,
+      capabilityReport: probe.capabilityReport,
+      errorHe: `מכשיר GeeLark (${targetDevice.serialName} · ${targetDevice.id}) מאומת ופעיל, אך בניית/שליפת Custom Flow נדחתה ע״י GeeLark (${
+        probe.capabilityReport?.customFlowCreationApi.detailHe || 'חסר FLOW_ID'
+      }). לא בוצעה שליחה חיצונית.`,
     };
   }
 
   // Ensure cloud phone is started (non-fatal if already running)
   await callGeeLarkApi('/open/v1/phone/start', { ids: [targetDevice.id] }, 8000);
 
-  const scheduleAt = Math.floor(Date.now() / 1000) + 1;
-  const rpaAdd = await callGeeLarkApi<{ taskId?: string; id?: string }>('/open/v1/rpa/task/add', {
+  // If Cloud Phone Shell API is supported, navigate TikTok directly into the confirmed owned LIVE room first
+  if (probe.capabilityReport?.shellAccess?.ok && ownedRoomCheck.normalizedRoom) {
+    const safeRoom = ownedRoomCheck.normalizedRoom.replace(/[^a-zA-Z0-9._]/g, '');
+    if (safeRoom) {
+      await callGeeLarkApi(
+        '/open/v1/shell/execute',
+        {
+          id: targetDevice.id,
+          cmd: `am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@${safeRoom}/live"`,
+        },
+        7000
+      );
+    }
+  }
+
+  const scheduleAt = Math.floor(Date.now() / 1000) + 2;
+  const rpaAdd = await callGeeLarkApi<{ taskId?: string; id?: string }>('/open/v1/task/rpa/add', {
     name: `BOOSTERA Chat @${ownedRoomCheck.normalizedRoom}`,
     remark: `Owned room verified: @${ownedRoomCheck.normalizedRoom}`,
     scheduleAt,
     id: targetDevice.id,
-    envId: targetDevice.id,
     flowId: matchedFlow.id,
     paramMap: {
       targetRoom: ownedRoomCheck.normalizedRoom,
       messageText: cleanMsg,
-      commentText: cleanMsg,
     },
   });
 
@@ -2630,14 +3207,16 @@ async function executeToGeeLark(opts: {
       status: 'EXECUTION_FAILED',
       device: targetDevice,
       flowId: matchedFlow.id,
-      errorHe: `GeeLark /open/v1/rpa/task/add נכשל (${rpaAdd.errorHe || 'שגיאה לא ידועה'})`,
+      normalizedRoom: ownedRoomCheck.normalizedRoom,
+      capabilityReport: probe.capabilityReport,
+      errorHe: `GeeLark /open/v1/task/rpa/add נכשל (${rpaAdd.errorHe || 'שגיאה לא ידועה'})`,
     };
   }
 
   const taskId = String(rpaAdd.data?.taskId || rpaAdd.data?.id || '').trim() || null;
   let taskDetailStatus = 'DISPATCHED';
   if (taskId) {
-    const detailRes = await callGeeLarkApi<{ status?: string | number; failDesc?: string }>(
+    const detailRes = await callGeeLarkApi<{ status?: string | number; failCode?: number; failDesc?: string }>(
       '/open/v1/task/detail',
       { id: taskId }
     );
@@ -2650,7 +3229,8 @@ async function executeToGeeLark(opts: {
           device: targetDevice,
           taskId,
           flowId: matchedFlow.id,
-          errorHe: `משימת GeeLark נכשלה: ${detailRes.data.failDesc}`,
+          normalizedRoom: ownedRoomCheck.normalizedRoom,
+          errorHe: `משימת GeeLark נכשלה (code=${detailRes.data.failCode ?? 'n/a'}): ${detailRes.data.failDesc}`,
         };
       }
     }
@@ -2662,7 +3242,8 @@ async function executeToGeeLark(opts: {
     device: targetDevice,
     taskId,
     flowId: matchedFlow.id,
-    detailHe: `משימת GeeLark RPA (${matchedFlow.title}) שוגרה למכשיר ${targetDevice.serialName} לחדר שבבעלותך @${ownedRoomCheck.normalizedRoom} (taskId=${taskId || 'n/a'}, status=${taskDetailStatus})`,
+    normalizedRoom: ownedRoomCheck.normalizedRoom,
+    detailHe: `משימת GeeLark Custom Task (${matchedFlow.title} · flowId=${matchedFlow.id}) שוגרה למכשיר ${targetDevice.serialName} (${targetDevice.id}) לחדר שבבעלותך @${ownedRoomCheck.normalizedRoom} (taskId=${taskId || 'n/a'}, status=${taskDetailStatus})`,
   };
 }
 
@@ -3595,8 +4176,8 @@ async function startServer() {
           ts: now,
           avatarUrl: resolvedAvatar,
         });
-        if (battleState.recentChatMessages.length > 18) {
-          battleState.recentChatMessages.length = 18;
+        if (battleState.recentChatMessages.length > 100) {
+          battleState.recentChatMessages.length = 100;
         }
         inspectLiveChatForModerationAndCompanion({
           sourceRoom: 'צ׳אט חי',
@@ -4681,8 +5262,8 @@ async function startServer() {
         source: 'מנחה מלווה',
         avatarUrl: chosenAccount.avatarUrl,
       });
-      if (battleState.recentChatMessages.length > 24) {
-        battleState.recentChatMessages.length = 24;
+      if (battleState.recentChatMessages.length > 100) {
+        battleState.recentChatMessages.length = 100;
       }
     }
 
@@ -5051,26 +5632,97 @@ async function startServer() {
     res.json({ ok: true, diagnostics: battleState.providerDiagnostics, state: battleState });
   });
 
-  app.post('/api/geelark/probe', async (_req, res) => {
-    const probe = await probeGeeLarkDevices();
+  app.post('/api/geelark/probe', async (req, res) => {
+    const autoBuild = Boolean(req.body?.autoBuildFlow);
+    const probe = await probeGeeLarkDevices(autoBuild);
     broadcast({ type: 'state:update', state: battleState });
     res.json({ ok: probe.connected, ...probe, audit: battleState.integrationAudit, state: battleState });
   });
 
+  app.post('/api/geelark/ensure-chat-flow', async (req, res) => {
+    const existingFlowId = req.body?.flowId ? String(req.body.flowId) : battleState.geelarkConfig?.selectedFlowId;
+    const ensured = await ensureOrImportTikTokLiveChatFlow(existingFlowId);
+    broadcast({ type: 'state:update', state: battleState });
+    res.status(ensured.ok ? 200 : 422).json({
+      ...ensured,
+      config: battleState.geelarkConfig,
+      flows: battleState.geelarkRpaFlows,
+      capabilityReport: battleState.geelarkCapabilityReport,
+      state: battleState,
+    });
+  });
+
+  app.post('/api/geelark/config', async (req, res) => {
+    const prev = battleState.geelarkConfig || loadPersistedGeeLarkConfig();
+    const selectedDeviceId =
+      req.body?.selectedDeviceId !== undefined ? String(req.body.selectedDeviceId).trim() : prev.selectedDeviceId;
+    const selectedFlowId =
+      req.body?.selectedFlowId !== undefined ? String(req.body.selectedFlowId).trim() : prev.selectedFlowId;
+    const ownedLiveUsername =
+      req.body?.ownedLiveUsername !== undefined
+        ? sanitizeTikTokHandle(String(req.body.ownedLiveUsername))
+        : prev.ownedLiveUsername;
+    const selectedLiveRoom =
+      req.body?.selectedLiveRoom !== undefined
+        ? sanitizeTikTokHandle(String(req.body.selectedLiveRoom))
+        : prev.selectedLiveRoom;
+
+    battleState.geelarkConfig = {
+      selectedDeviceId: selectedDeviceId || prev.selectedDeviceId,
+      selectedFlowId,
+      ownedLiveUsername,
+      selectedLiveRoom,
+      updatedAt: Date.now(),
+    };
+    savePersistedGeeLarkConfig(battleState.geelarkConfig);
+
+    let liveConnectResult: { connected: boolean; errorHe?: string } | null = null;
+    if (req.body?.connectOwnedLiveNow && ownedLiveUsername) {
+      const cRes = await connectCreatorToSwarm(ownedLiveUsername, {
+        listenMode: 'MY_BROADCAST',
+        mirrorToStage: true,
+        addToWatchlist: true,
+      });
+      liveConnectResult = { connected: cRes.connected, errorHe: cRes.errorHe };
+    }
+
+    if (battleState.geelarkCapabilityReport) {
+      await probeGeeLarkDevices();
+    } else {
+      battleState.integrationAudit = computeIntegrationAudit();
+    }
+
+    broadcast({ type: 'state:update', state: battleState });
+    res.json({
+      ok: true,
+      config: battleState.geelarkConfig,
+      liveConnectResult,
+      state: battleState,
+    });
+  });
+
   app.post('/api/geelark/execute-chat', async (req, res) => {
     const messageText = String(req.body?.messageText || '').trim();
-    const deviceId = String(req.body?.deviceId || readEnvClean('GEELARK_ENV_ID').value || '').trim();
+    const deviceId = String(
+      req.body?.deviceId ||
+        battleState.geelarkConfig?.selectedDeviceId ||
+        readEnvClean('GEELARK_ENV_ID').value ||
+        TARGET_GEELARK_DEVICE_ID
+    ).trim();
     const targetRoomUsername = req.body?.targetRoomUsername
       ? String(req.body.targetRoomUsername)
-      : battleState.tiktokRoom.targetUsername;
+      : battleState.geelarkConfig?.ownedLiveUsername || battleState.tiktokRoom.targetUsername;
     const confirmedOwnedRoom = Boolean(req.body?.confirmedOwnedRoom);
-    const flowId = req.body?.flowId ? String(req.body.flowId) : undefined;
+    const flowId = req.body?.flowId
+      ? String(req.body.flowId)
+      : battleState.geelarkConfig?.selectedFlowId || undefined;
 
     if (!messageText) {
       res.status(400).json({ ok: false, status: 'EXECUTION_FAILED', errorHe: 'נדרש טקסט הודעה לביצוע' });
       return;
     }
 
+    const dispatchTs = Date.now();
     const result = await executeToGeeLark({
       deviceId,
       targetRoomUsername,
@@ -5090,17 +5742,53 @@ async function startServer() {
               ? 422
               : 502;
 
-    if (result.ok) {
+    let verifiedInLiveChat = false;
+    let verificationDetailHe = 'לא שוגרה הודעה חיצונית — אימות הופעה בצ׳אט לא בוצע.';
+
+    if (result.ok && result.normalizedRoom) {
+      await connectCreatorToSwarm(result.normalizedRoom, {
+        listenMode: 'MY_BROADCAST',
+        mirrorToStage: true,
+        silentIfOffline: true,
+      });
+
+      const deadline = Date.now() + 7000;
+      const needle = messageText.toLowerCase();
+      const targetHandle = `@${result.normalizedRoom.toLowerCase()}`;
+      while (Date.now() < deadline) {
+        const seen = battleState.recentChatMessages.find(
+          (m) =>
+            m.ts >= dispatchTs - 1000 &&
+            (m.source || '').toLowerCase() === targetHandle &&
+            m.text.toLowerCase().includes(needle)
+        );
+        if (seen) {
+          verifiedInLiveChat = true;
+          verificationDetailHe = `אומת בפועל בצ׳אט החי של ${targetHandle} ע״י tiktok-live-connector (מאת ${seen.user}: "${seen.text}")`;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 700));
+      }
+
+      if (!verifiedInLiveChat) {
+        verificationDetailHe = `המשימה שוגרה ל-GeeLark (taskId=${result.taskId || 'n/a'}), אך ההודעה טרם נצפתה בפיד החי של ${targetHandle} ב-tiktok-live-connector בתוך 7 שניות.`;
+      }
+
       pushLog({
-        eventType: 'GEELARK_CHAT_SENT',
+        eventType: verifiedInLiveChat ? 'GEELARK_CHAT_VERIFIED' : 'GEELARK_CHAT_SENT',
         userLabel: result.device?.serialName || 'GeeLark',
         triggeredEffectId: result.taskId || null,
         status: 'TRIGGERED',
-        detailHe: result.detailHe || 'נשלחה הודעת צ׳אט דרך GeeLark RPA',
+        detailHe: `${result.detailHe || ''} · ${verificationDetailHe}`,
       });
     }
     broadcast({ type: 'state:update', state: battleState });
-    res.status(httpStatus).json({ ...result, state: battleState });
+    res.status(httpStatus).json({
+      ...result,
+      verifiedInLiveChat,
+      verificationDetailHe,
+      state: battleState,
+    });
   });
 
   app.post('/api/memory/approve-proposal', (req, res) => {
@@ -6625,7 +7313,7 @@ Return JSON matching the schema:
         source: `@${cleanUsername}`,
         avatarUrl,
       });
-      if (battleState.recentChatMessages.length > 24) battleState.recentChatMessages.length = 24;
+      if (battleState.recentChatMessages.length > 100) battleState.recentChatMessages.length = 100;
 
       // Secondary Cloud Warning: if chat in mirrored room warns about opponent cloud ("ענן" / "smoke" / "mist")
       if (

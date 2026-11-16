@@ -36,6 +36,7 @@ import {
 import { LearningVaultPanel } from './LearningVaultPanel';
 import { WsEventSnifferPanel } from './WsEventSnifferPanel';
 import { ChatCompanionCrewPanel } from './ChatCompanionCrewPanel';
+import { DetectedLiveChatHistoryPanel } from './DetectedLiveChatHistoryPanel';
 import { soundEngine } from '../engine/soundEngine';
 
 interface TikTokIntelAndMemoryWorkspaceProps {
@@ -626,6 +627,9 @@ export const TikTokIntelAndMemoryWorkspace: React.FC<TikTokIntelAndMemoryWorkspa
 
       {/* LIVE WEBSOCKET EVENT SNIFFER, COLLECTOR & CUSTOM AUTO-TRIGGER ROUTER */}
       <WsEventSnifferPanel battleState={battleState} refreshState={refreshState} />
+
+      {/* DETECTED LIVE CHAT HISTORY WITH PREDEFINED KEYWORD FILTERING */}
+      <DetectedLiveChatHistoryPanel battleState={battleState} />
 
       {/* LIVE CHAT TRACKING, CO-HOST MODERATOR LEARNING & MULTI-ACCOUNT CREW */}
       <ChatCompanionCrewPanel

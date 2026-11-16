@@ -540,10 +540,31 @@ export function useBattleLiveEngine(enableAudio = true) {
     []
   );
 
+  const saveGeeLarkConfig = useCallback(
+    async (payload: {
+      selectedDeviceId?: string;
+      selectedFlowId?: string;
+      ownedLiveUsername?: string;
+      selectedLiveRoom?: string;
+      connectOwnedLiveNow?: boolean;
+    }) => {
+      const res = await fetch('/api/geelark/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.state) setBattleState(json.state);
+      return json;
+    },
+    []
+  );
+
   const executeGeeLarkChat = useCallback(
     async (payload: {
       messageText: string;
       deviceId?: string;
+      flowId?: string;
       targetRoomUsername: string;
       confirmedOwnedRoom?: boolean;
     }) => {
@@ -591,6 +612,7 @@ export function useBattleLiveEngine(enableAudio = true) {
     probeGeeLarkAndAudit,
     runProviderDiagnostics,
     approveProposal,
+    saveGeeLarkConfig,
     executeGeeLarkChat,
     generateAiClientVideo,
     clearAiClientVideo,

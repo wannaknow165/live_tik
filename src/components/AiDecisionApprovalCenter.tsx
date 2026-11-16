@@ -42,12 +42,28 @@ interface AiDecisionApprovalCenterProps {
     id: string,
     action: 'APPROVE' | 'REJECT'
   ) => Promise<{ ok?: boolean; errorHe?: string }>;
+  saveGeeLarkConfig: (payload: {
+    selectedDeviceId?: string;
+    selectedFlowId?: string;
+    ownedLiveUsername?: string;
+    selectedLiveRoom?: string;
+    connectOwnedLiveNow?: boolean;
+  }) => Promise<{ ok?: boolean; liveConnectResult?: { connected: boolean; errorHe?: string } | null }>;
   executeGeeLarkChat: (payload: {
     messageText: string;
     deviceId?: string;
+    flowId?: string;
     targetRoomUsername: string;
     confirmedOwnedRoom?: boolean;
-  }) => Promise<{ ok?: boolean; status?: string; taskId?: string | null; errorHe?: string; detailHe?: string }>;
+  }) => Promise<{
+    ok?: boolean;
+    status?: string;
+    taskId?: string | null;
+    errorHe?: string;
+    detailHe?: string;
+    verifiedInLiveChat?: boolean;
+    verificationDetailHe?: string;
+  }>;
   refreshState: () => Promise<void>;
 }
 
@@ -113,6 +129,7 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
   probeGeeLarkAndAudit,
   runProviderDiagnostics,
   approveProposal,
+  saveGeeLarkConfig,
   executeGeeLarkChat,
   refreshState,
 }) => {
@@ -121,16 +138,55 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
   const [promptInput, setPromptInput] = useState<string>('');
   const [busyAction, setBusyAction] = useState<boolean>(false);
   const [probing, setProbing] = useState<boolean>(false);
+  const [buildingFlow, setBuildingFlow] = useState<boolean>(false);
   const [testingProviders, setTestingProviders] = useState<boolean>(false);
+  const [savingConfig, setSavingConfig] = useState<boolean>(false);
   const [statusBannerHe, setStatusBannerHe] = useState<string | null>(null);
 
-  // Owned-Room Safe GeeLark Execution Form
-  const [geelarkRoomInput, setGeelarkRoomInput] = useState<string>(
-    battleState.integrationAudit?.tiktokAccount.ownedRoomUsername || ''
+  // Persistent GeeLark Device & Owned Live Room Selection
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>(
+    battleState.geelarkConfig?.selectedDeviceId || '646174035834568877'
   );
-  const [geelarkMsgInput, setGeelarkMsgInput] = useState<string>('בדיקת שידור אולפן BOOSTERA!');
+  const [selectedFlowId, setSelectedFlowId] = useState<string>(
+    battleState.geelarkConfig?.selectedFlowId || ''
+  );
+  const [ownedLiveInput, setOwnedLiveInput] = useState<string>(
+    battleState.geelarkConfig?.ownedLiveUsername ||
+      battleState.integrationAudit?.tiktokAccount.ownedRoomUsername ||
+      ''
+  );
+  const [geelarkMsgInput, setGeelarkMsgInput] = useState<string>('בדיקת שידור מאושרת BOOSTERA');
   const [confirmedOwnedRoom, setConfirmedOwnedRoom] = useState<boolean>(false);
-  const [geelarkExecResultHe, setGeelarkExecResultHe] = useState<string | null>(null);
+  const [approvedTestMessage, setApprovedTestMessage] = useState<boolean>(false);
+  const [geelarkExecResult, setGeelarkExecResult] = useState<{
+    ok: boolean;
+    summaryHe: string;
+    verifiedInLiveChat?: boolean;
+    verificationDetailHe?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (battleState.geelarkConfig?.selectedDeviceId) {
+      setSelectedDeviceId(battleState.geelarkConfig.selectedDeviceId);
+    }
+    if (battleState.geelarkConfig?.selectedFlowId !== undefined) {
+      setSelectedFlowId(battleState.geelarkConfig.selectedFlowId);
+    }
+    if (battleState.geelarkConfig?.ownedLiveUsername && !ownedLiveInput) {
+      setOwnedLiveInput(battleState.geelarkConfig.ownedLiveUsername);
+    }
+  }, [
+    battleState.geelarkConfig?.selectedDeviceId,
+    battleState.geelarkConfig?.selectedFlowId,
+    battleState.geelarkConfig?.ownedLiveUsername,
+    ownedLiveInput,
+  ]);
+
+  useEffect(() => {
+    if (!battleState.geelarkCapabilityReport && (battleState.geelarkDevices || []).length === 0) {
+      void probeGeeLarkAndAudit();
+    }
+  }, [battleState.geelarkCapabilityReport, battleState.geelarkDevices, probeGeeLarkAndAudit]);
 
   useEffect(() => {
     if (decisions.length > 0 && (!selectedId || !decisions.some((d) => d.id === selectedId))) {
@@ -212,9 +268,31 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
     try {
       await probeGeeLarkAndAudit();
       await refreshState();
-      setStatusBannerHe('בדיקת החיבורים (GeeLark + RPA, TikTok, מועצת AI) עודכנה בזמן אמת.');
+      setStatusBannerHe('בדיקת החיבורים (GeeLark + Custom Flows, TikTok, מועצת AI) עודכנה בזמן אמת.');
     } finally {
       setProbing(false);
+    }
+  };
+
+  const handleEnsureCustomFlow = async () => {
+    setBuildingFlow(true);
+    setStatusBannerHe(null);
+    try {
+      const resp = await fetch('/api/geelark/ensure-chat-flow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flowId: selectedFlowId || undefined }),
+      });
+      const json = await resp.json();
+      await refreshState();
+      if (json.flowId) {
+        setSelectedFlowId(json.flowId);
+      }
+      setStatusBannerHe(json.detailHe || (json.ok ? 'Custom Flow הוגדר בהצלחה.' : 'בניית Custom Flow נדחתה ע״י GeeLark.'));
+    } catch {
+      setStatusBannerHe('שגיאת תקשורת מול השרת בבניית Custom Flow.');
+    } finally {
+      setBuildingFlow(false);
     }
   };
 
@@ -230,20 +308,75 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
     }
   };
 
+  const handleSaveDeviceAndLiveSelection = async (connectNow = true) => {
+    setSavingConfig(true);
+    setStatusBannerHe(null);
+    try {
+      const cleanOwned = ownedLiveInput.replace(/^@/, '').trim();
+      const res = await saveGeeLarkConfig({
+        selectedDeviceId,
+        selectedFlowId,
+        ownedLiveUsername: cleanOwned,
+        selectedLiveRoom: cleanOwned,
+        connectOwnedLiveNow: connectNow && Boolean(cleanOwned),
+      });
+      if (res.liveConnectResult) {
+        setStatusBannerHe(
+          res.liveConnectResult.connected
+            ? `נשמרה בחירת המכשיר (${selectedDeviceId}) והתחברנו בלייב דרך tiktok-live-connector אל @${cleanOwned}.`
+            : `נשמרה הבחירה (@${cleanOwned} · מכשיר ${selectedDeviceId}). סטטוס לייב כרגע: ${
+                res.liveConnectResult.errorHe || 'לא בשידור פעיל ברגע זה'
+              }`
+        );
+      } else {
+        setStatusBannerHe(`נשמרה בחירת המכשיר (${selectedDeviceId})${cleanOwned ? ` והחדר @${cleanOwned}` : ''}.`);
+      }
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   const handleGeeLarkChatExecute = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!approvedTestMessage) {
+      setGeelarkExecResult({
+        ok: false,
+        summaryHe: 'נדרש לאשר מפורשות את נוסח הודעת הניסיון לפני שיגור לחדר שבשליטתך.',
+      });
+      return;
+    }
     setBusyAction(true);
-    setGeelarkExecResultHe(null);
+    setGeelarkExecResult(null);
     try {
+      const cleanOwned = ownedLiveInput.replace(/^@/, '').trim();
+      await saveGeeLarkConfig({
+        selectedDeviceId,
+        selectedFlowId,
+        ownedLiveUsername: cleanOwned,
+        selectedLiveRoom: cleanOwned,
+        connectOwnedLiveNow: false,
+      });
       const res = await executeGeeLarkChat({
         messageText: geelarkMsgInput.trim(),
-        targetRoomUsername: geelarkRoomInput.trim(),
+        deviceId: selectedDeviceId,
+        flowId: selectedFlowId || undefined,
+        targetRoomUsername: cleanOwned,
         confirmedOwnedRoom,
       });
       if (res.ok) {
-        setGeelarkExecResultHe(res.detailHe || `בוצע בהצלחה (taskId=${res.taskId || 'sent'})`);
+        setGeelarkExecResult({
+          ok: true,
+          summaryHe: res.detailHe || `שוגר ל-GeeLark (taskId=${res.taskId || 'sent'})`,
+          verifiedInLiveChat: res.verifiedInLiveChat,
+          verificationDetailHe: res.verificationDetailHe,
+        });
       } else {
-        setGeelarkExecResultHe(`${res.status || 'FAILED'}: ${res.errorHe || 'שגיאה בביצוע GeeLark'}`);
+        setGeelarkExecResult({
+          ok: false,
+          summaryHe: `${res.status || 'FAILED'}: ${res.errorHe || 'שגיאה בביצוע GeeLark'}`,
+          verifiedInLiveChat: false,
+          verificationDetailHe: res.verificationDetailHe,
+        });
       }
     } finally {
       setBusyAction(false);
@@ -351,71 +484,161 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
         )}
       </section>
 
-      {/* Live Model Diagnostics & Infrastructure Audit (Requested vs Actual, Separated Auth vs Model) */}
+      {/* Live Model Diagnostics & Infrastructure Audit */}
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* 1. GeeLark Device & RPA Flow Audit */}
-        <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2">
-          <div className="flex items-center justify-between">
+        {/* 1. GeeLark Device 646174035834568877 & Capability Audit */}
+        <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
               <Smartphone className="w-4 h-4 text-cyan-400" />
-              1. מכשיר GeeLark ויכולת RPA
+              1. אימות מכשיר GeeLark ויכולות
             </span>
-            <span
-              className={`px-2 py-0.5 rounded border text-[10px] font-mono ${
-                audit?.geelark.connected && audit?.geelark.rpaReady
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                  : audit?.geelark.connected
-                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                    : 'bg-slate-900 border-slate-700 text-slate-400'
-              }`}
-            >
+            <span className="text-[11px] font-mono text-slate-300">
               {audit?.geelark.connected
                 ? audit?.geelark.rpaReady
                   ? 'RPA_READY'
-                  : 'DEVICE_ONLY_NO_RPA'
+                  : 'DEVICE_VERIFIED'
                 : 'NOT_CONNECTED'}
             </span>
           </div>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            {audit?.geelark.statusHe || 'בודק מצב חיבור GeeLark...'}
-          </p>
-          <div className="text-[11px] font-mono text-slate-400 space-y-1">
-            <div>מכשירים: {audit?.geelark.devicesCount ?? 0} · משימות RPA: {(battleState.geelarkRpaFlows || []).length}</div>
-            {(battleState.geelarkDevices || []).slice(0, 3).map((dev) => (
-              <div key={dev.id} className="text-[10px] text-emerald-300/90 truncate">
-                {dev.serialName} · {dev.id} (status={dev.status})
-              </div>
-            ))}
+
+          <div className="space-y-1.5 text-xs">
+            <label className="block text-[11px] text-slate-400">מכשיר ענן פעיל (נשלף אוטומטית מהחיבור)</label>
+            <select
+              aria-label="בחירת מכשיר GeeLark"
+              value={selectedDeviceId}
+              onChange={(e) => {
+                setSelectedDeviceId(e.target.value);
+                void saveGeeLarkConfig({ selectedDeviceId: e.target.value });
+              }}
+              className="w-full bg-[#0B0E14] border border-[#283246] rounded-lg px-2.5 py-1.5 text-xs text-slate-100 font-mono"
+            >
+              {(battleState.geelarkDevices || []).length === 0 ? (
+                <option value="646174035834568877">646174035834568877 (טוען מהחיבור...)</option>
+              ) : (
+                (battleState.geelarkDevices || []).map((dev) => {
+                  const statusLabel =
+                    dev.status === '0'
+                      ? 'Running (פעיל)'
+                      : dev.status === '1'
+                        ? 'Starting (עולה)'
+                        : dev.status === '2'
+                          ? 'Stopped (כבוי — יופעל בשיגור)'
+                          : dev.status === '3'
+                            ? 'Expired'
+                            : `status=${dev.status}`;
+                  return (
+                    <option key={dev.id} value={dev.id}>
+                      {dev.serialName} · {dev.id} · {statusLabel}
+                    </option>
+                  );
+                })
+              )}
+            </select>
           </div>
+
+          {battleState.geelarkCapabilityReport && (
+            <div className="text-[11px] text-slate-300 space-y-1 pt-1 border-t border-[#1E2636]">
+              <div className="font-mono text-emerald-300">
+                {battleState.geelarkCapabilityReport.targetDeviceVerified
+                  ? `מאומת: ${battleState.geelarkCapabilityReport.targetDeviceName} (${battleState.geelarkCapabilityReport.targetDeviceId})`
+                  : `מכשיר ${battleState.geelarkCapabilityReport.targetDeviceId} לא נמצא ברשימה`}
+              </div>
+              {battleState.geelarkCapabilityReport.installedTikTokPackage && (
+                <div className="text-emerald-300/90 font-mono text-[10px]">
+                  אפליקציה במכשיר: {battleState.geelarkCapabilityReport.installedTikTokPackage}
+                </div>
+              )}
+              <div className="text-slate-400">
+                חשבון TikTok במכשיר:{' '}
+                {battleState.geelarkCapabilityReport.detectedTikTokHandleOnDevice
+                  ? `@${battleState.geelarkCapabilityReport.detectedTikTokHandleOnDevice}`
+                  : 'אינו נחשף מ-phone/list של GeeLark'}
+              </div>
+              <div className="flex items-center justify-between gap-2 text-slate-300">
+                <span>
+                  Custom Flows בחשבון: {battleState.geelarkCapabilityReport.rpaFlowList.count}
+                  {selectedFlowId ? ` (${selectedFlowId})` : ''}
+                </span>
+                <button
+                  type="button"
+                  disabled={buildingFlow}
+                  onClick={handleEnsureCustomFlow}
+                  className="px-2 py-0.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-200 text-[10px] font-semibold disabled:opacity-50"
+                >
+                  {buildingFlow ? 'מגדיר...' : 'בנה/יבא Flow'}
+                </button>
+              </div>
+              {battleState.geelarkCapabilityReport.shellAccess && (
+                <div className="text-[10px] text-slate-400 leading-relaxed">
+                  • {battleState.geelarkCapabilityReport.shellAccess.detailHe}
+                </div>
+              )}
+              {battleState.geelarkCapabilityReport.missingRequirementsHe.map((m, idx) => (
+                <div key={idx} className="text-[10px] text-amber-300/95 leading-relaxed">
+                  • {m}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* 2. TikTok Account & Owned Room Guard */}
-        <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2">
-          <div className="flex items-center justify-between">
+        {/* 2. TikTok Open-Source Live Feed & Persistent Owned Room Selection */}
+        <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-emerald-400" />
-              2. חשבון TikTok והגנת חדר
+              2. בחירת לייב ושמירת חדר בשליטתך
             </span>
-            <span
-              className={`px-2 py-0.5 rounded border text-[10px] font-mono ${
-                audit?.tiktokAccount.webcastConnected
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                  : 'bg-slate-900 border-slate-700 text-slate-400'
-              }`}
-            >
-              {audit?.tiktokAccount.webcastConnected ? 'WEBCAST_LIVE' : 'OFFLINE'}
+            <span className="text-[11px] font-mono text-slate-300">
+              {audit?.tiktokAccount.webcastConnected ? 'tiktok-live-connector LIVE' : 'STANDBY'}
             </span>
           </div>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            {audit?.tiktokAccount.accessSummaryHe || 'אין חיבור חי כרגע'}
+
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            קליטת תגובות, מתנות ואירועים פועלת בקוד פתוח דרך <span className="font-mono text-slate-200">tiktok-live-connector</span> ללא שירות בתשלום.
           </p>
-          <div className="text-[11px] font-mono text-slate-400 space-y-0.5 truncate">
-            <div>
-              חדר בבעלותך: {audit?.tiktokAccount.ownedRoomUsername ? `@${audit.tiktokAccount.ownedRoomUsername}` : 'לא הוגדר (TIKTOK_OWNED_ROOM_USERNAME)'}
+
+          {(battleState.tiktokRoom.monitoredRooms || []).length > 0 && (
+            <div className="space-y-1">
+              <label className="block text-[11px] text-slate-400">חדרי לייב מחוברים כעת (קריאה בלבד)</label>
+              <div className="text-[11px] font-mono text-sky-300 truncate">
+                {(battleState.tiktokRoom.monitoredRooms || [])
+                  .map((r) => `@${r.username} (${r.viewerCount})`)
+                  .join(' · ')}
+              </div>
             </div>
-            <div className="text-slate-500 truncate">
-              OAuth: {audit?.tiktokAccount.oauthUser || (audit?.tiktokAccount.oauthConfigured ? 'מוגדר' : 'לא מוגדר')}
+          )}
+
+          <div className="space-y-1.5">
+            <label className="block text-[11px] text-slate-300 font-semibold">
+              שם משתמש הלייב שבשליטתך בלבד (נשמר בשרת)
+            </label>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={ownedLiveInput}
+                onChange={(e) => setOwnedLiveInput(e.target.value)}
+                placeholder="@your_live_username"
+                aria-label="שם משתמש הלייב שבשליטתי"
+                className="flex-1 min-w-0 bg-[#0B0E14] border border-[#283246] rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+              />
+              <button
+                type="button"
+                disabled={savingConfig}
+                onClick={() => handleSaveDeviceAndLiveSelection(true)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shrink-0 disabled:opacity-50"
+              >
+                {savingConfig ? 'שומר...' : 'שמור והתחבר'}
+              </button>
             </div>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-400 truncate">
+            חדר שמור לבדיקה:{' '}
+            {battleState.geelarkConfig?.ownedLiveUsername
+              ? `@${battleState.geelarkConfig.ownedLiveUsername}`
+              : 'טרם הוזן שם משתמש שבשליטתך'}
           </div>
         </div>
 
@@ -431,14 +654,25 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
             {/* OpenAI */}
             <div className="bg-[#0B0E14] border border-[#1E2636] rounded p-2 space-y-0.5">
               <div className="flex items-center justify-between">
-                <span className="text-slate-200 font-semibold">OpenAI ({diag?.openai.requestedModel || audit?.aiProviders.openaiRequestedModel || 'gpt-6-astra'})</span>
+                <span className="text-slate-200 font-semibold">
+                  OpenAI ({diag?.openai.requestedModel || audit?.aiProviders.openaiRequestedModel || 'gpt-6-astra'})
+                </span>
                 <span className={`font-mono ${diag?.openai.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {diag ? (diag.openai.ok ? 'OK' : diag.openai.authOk ? 'MODEL_ERR' : 'AUTH_ERR') : audit?.aiProviders.openaiConfigured ? 'CONFIGURED' : 'MISSING'}
+                  {diag
+                    ? diag.openai.ok
+                      ? 'OK'
+                      : diag.openai.authOk
+                        ? 'MODEL_ERR'
+                        : 'AUTH_ERR'
+                    : audit?.aiProviders.openaiConfigured
+                      ? 'CONFIGURED'
+                      : 'MISSING'}
                 </span>
               </div>
               {diag?.openai && (
                 <div className="text-[10px] font-mono text-slate-400 truncate">
-                  actual={diag.openai.actualModel || 'NONE'} · auth={String(diag.openai.authOk)} · model={String(diag.openai.modelOk)}
+                  actual={diag.openai.actualModel || 'NONE'} · auth={String(diag.openai.authOk)} · model=
+                  {String(diag.openai.modelOk)}
                 </div>
               )}
               {diag?.openai.errorHe && <div className="text-[10px] text-rose-300 break-words">{diag.openai.errorHe}</div>}
@@ -447,14 +681,25 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
             {/* Claude (Anthropic) — Separate Auth vs Model */}
             <div className="bg-[#0B0E14] border border-[#1E2636] rounded p-2 space-y-0.5">
               <div className="flex items-center justify-between">
-                <span className="text-slate-200 font-semibold">Claude ({diag?.claude.requestedModel || audit?.aiProviders.claudeRequestedModel || 'claude-fable-5-2'})</span>
+                <span className="text-slate-200 font-semibold">
+                  Claude ({diag?.claude.requestedModel || audit?.aiProviders.claudeRequestedModel || 'claude-fable-5-2'})
+                </span>
                 <span className={`font-mono ${diag?.claude.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {diag ? (diag.claude.ok ? 'OK' : diag.claude.authOk ? 'MODEL_ERR' : 'AUTH_ERR') : audit?.aiProviders.claudeConfigured ? 'CONFIGURED' : 'MISSING'}
+                  {diag
+                    ? diag.claude.ok
+                      ? 'OK'
+                      : diag.claude.authOk
+                        ? 'MODEL_ERR'
+                        : 'AUTH_ERR'
+                    : audit?.aiProviders.claudeConfigured
+                      ? 'CONFIGURED'
+                      : 'MISSING'}
                 </span>
               </div>
               {diag?.claude && (
                 <div className="text-[10px] font-mono text-slate-400 truncate">
-                  actual={diag.claude.actualModel || 'NONE'} · keyAuth={String(diag.claude.authOk)} · model={String(diag.claude.modelOk)}
+                  actual={diag.claude.actualModel || 'NONE'} · keyAuth={String(diag.claude.authOk)} · model=
+                  {String(diag.claude.modelOk)}
                 </div>
               )}
               {diag?.claude.errorHe && <div className="text-[10px] text-rose-300 break-words">{diag.claude.errorHe}</div>}
@@ -463,35 +708,72 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
             {/* Gemini Collector/Executor */}
             <div className="flex items-center justify-between text-[11px] px-1">
               <span className="text-slate-300">Gemini (איסוף וביצוע בלבד)</span>
-              <span className={`font-mono ${diag ? (diag.gemini.ok ? 'text-emerald-300' : 'text-rose-300') : audit?.aiProviders.geminiConfigured ? 'text-cyan-300' : 'text-slate-500'}`}>
-                {diag ? (diag.gemini.ok ? 'gemini-4-hydrogen OK' : 'FAILED') : audit?.aiProviders.geminiConfigured ? 'EXECUTOR_ONLY' : 'MISSING'}
+              <span
+                className={`font-mono ${
+                  diag
+                    ? diag.gemini.ok
+                      ? 'text-emerald-300'
+                      : 'text-rose-300'
+                    : audit?.aiProviders.geminiConfigured
+                      ? 'text-cyan-300'
+                      : 'text-slate-500'
+                }`}
+              >
+                {diag
+                  ? diag.gemini.ok
+                    ? 'gemini-4-hydrogen OK'
+                    : 'QUOTA_OR_ERR'
+                  : audit?.aiProviders.geminiConfigured
+                    ? 'EXECUTOR_ONLY'
+                    : 'MISSING'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* 4. Safe Owned-Room GeeLark Real Chat Execution */}
+        {/* 4. Approved Owned-Room GeeLark Real Chat Execution + Live Verification */}
         <div className="bg-[#121722] border border-[#1E2636] rounded-xl p-4 space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
               <MessageSquareShare className="w-4 h-4 text-rose-400" />
-              4. בדיקת צ׳אט אמת ב-GeeLark
+              4. שליחת הודעת ניסיון מאושרת ואימות הופעה
             </span>
           </div>
+
+          {(battleState.geelarkRpaFlows || []).length > 0 && (
+            <select
+              aria-label="בחירת תהליך RPA ב-GeeLark"
+              value={selectedFlowId}
+              onChange={(e) => {
+                setSelectedFlowId(e.target.value);
+                void saveGeeLarkConfig({ selectedFlowId: e.target.value });
+              }}
+              className="w-full bg-[#0B0E14] border border-[#283246] rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+            >
+              {(battleState.geelarkRpaFlows || []).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title} ({f.id})
+                </option>
+              ))}
+            </select>
+          )}
+
           <form onSubmit={handleGeeLarkChatExecute} className="space-y-2 text-[11px]">
-            <input
-              type="text"
-              value={geelarkRoomInput}
-              onChange={(e) => setGeelarkRoomInput(e.target.value)}
-              placeholder="@owned_room (חדר שבשליטתך בלבד)"
-              className="w-full bg-[#0B0E14] border border-[#283246] rounded px-2.5 py-1.5 text-xs text-slate-100"
-            />
+            <div className="text-[11px] text-slate-400">
+              יעד שליחה:{' '}
+              <span className="font-mono text-slate-100">
+                {ownedLiveInput.trim() ? `@${ownedLiveInput.replace(/^@/, '').trim()}` : 'הגדר חדר בשליטתך בכרטיס 2'}
+              </span>
+            </div>
             <input
               type="text"
               value={geelarkMsgInput}
-              onChange={(e) => setGeelarkMsgInput(e.target.value)}
-              placeholder="הודעה לבדיקה בחדר שבשליטתך..."
-              className="w-full bg-[#0B0E14] border border-[#283246] rounded px-2.5 py-1.5 text-xs text-slate-100"
+              onChange={(e) => {
+                setGeelarkMsgInput(e.target.value);
+                setApprovedTestMessage(false);
+              }}
+              placeholder="נוסח הודעת הניסיון לאישור..."
+              className="w-full bg-[#0B0E14] border border-[#283246] rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
             />
             <label className="flex items-center gap-1.5 text-[10px] text-slate-300 cursor-pointer">
               <input
@@ -500,19 +782,36 @@ export const AiDecisionApprovalCenter: React.FC<AiDecisionApprovalCenterProps> =
                 onChange={(e) => setConfirmedOwnedRoom(e.target.checked)}
                 className="accent-amber-500"
               />
-              <span>מאשר שחדר זה בשליטתי בלבד (לעולם לא לחדרים אחרים)</span>
+              <span>אני מאשר שהלייב הנבחר בשליטתי בלבד (לעולם לא בחדרים אחרים)</span>
+            </label>
+            <label className="flex items-center gap-1.5 text-[10px] text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={approvedTestMessage}
+                onChange={(e) => setApprovedTestMessage(e.target.checked)}
+                className="accent-emerald-500"
+              />
+              <span>אני מאשר את נוסח הודעת הניסיון לשיגור ואימות בטיקטוק</span>
             </label>
             <button
               type="submit"
-              disabled={busyAction}
-              className="w-full px-3 py-1.5 rounded bg-[#1E2636] hover:bg-[#2A364F] border border-[#32405D] text-slate-100 font-semibold text-xs disabled:opacity-50"
+              disabled={busyAction || !ownedLiveInput.trim()}
+              className="w-full px-3 py-1.5 rounded-lg bg-[#1E2636] hover:bg-[#2A364F] border border-[#32405D] text-slate-100 font-semibold text-xs disabled:opacity-50"
             >
-              שגר דרך GeeLark RPA לחדר שלי
+              שגר דרך המכשיר הנבחר ואמת בצ׳אט החי
             </button>
           </form>
-          {geelarkExecResultHe && (
-            <div className="text-[10px] font-mono bg-[#0B0E14] border border-[#283246] rounded p-2 text-amber-200 break-words">
-              {geelarkExecResultHe}
+
+          {geelarkExecResult && (
+            <div className="text-[10px] font-mono bg-[#0B0E14] border border-[#283246] rounded-lg p-2 space-y-1 break-words">
+              <div className={geelarkExecResult.ok ? 'text-emerald-300' : 'text-amber-300'}>
+                שיגור ל-GeeLark: {geelarkExecResult.summaryHe}
+              </div>
+              {geelarkExecResult.verificationDetailHe && (
+                <div className={geelarkExecResult.verifiedInLiveChat ? 'text-emerald-300' : 'text-slate-400'}>
+                  אימות הופעה בטיקטוק: {geelarkExecResult.verificationDetailHe}
+                </div>
+              )}
             </div>
           )}
         </div>

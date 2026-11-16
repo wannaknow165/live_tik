@@ -53,6 +53,7 @@ export default function App() {
     probeGeeLarkAndAudit,
     runProviderDiagnostics,
     approveProposal,
+    saveGeeLarkConfig,
     executeGeeLarkChat,
     generateAiClientVideo,
     clearAiClientVideo,
@@ -165,6 +166,7 @@ export default function App() {
             probeGeeLarkAndAudit={probeGeeLarkAndAudit}
             runProviderDiagnostics={runProviderDiagnostics}
             approveProposal={approveProposal}
+            saveGeeLarkConfig={saveGeeLarkConfig}
             executeGeeLarkChat={executeGeeLarkChat}
             refreshState={refreshState}
           />
